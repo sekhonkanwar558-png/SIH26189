@@ -711,7 +711,7 @@ Append one line per session. What you built · what you changed in this file · 
   - **Two contract clarifications, no contract changes.** §5.1 now records the `doc:` prefix exception that was already in its own examples, and the id-normalisation rules. §5.2 gained the act tools.
   - **§7 setup was wrong and is corrected** — everything runs from the repo root (`uvicorn backend.api.main:app`), not from `backend/`. `numpy` and `scipy` are required (NetworkX pagerank needs them). spaCy is genuinely optional.
   - **Three bugs found by measurement, worth not reintroducing** (D15): co-occurrence linking run over a CDR export created 606 meaningless edges and buried the real structure; the ownership heuristic gave one man another man's phone and produced a plausible false path; a name pattern crossed a full stop and merged two people into `person:manjit_singh_accused_sukhwinder`.
-  - **Untested:** the live API call. No key on the build machine. See §11.
+  - **Untested:** the live API call. No key on the build machine, and **deferred on purpose** until the rest is built (§11) — nothing downstream is blocked on it, because findings, the graph, analytics and custody all work with no model at all (D11).
 
 ---
 
