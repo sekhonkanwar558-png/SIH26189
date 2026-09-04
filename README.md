@@ -682,12 +682,20 @@ Demo case, for scale: **94 entities, 1,087 links, 6 documents, 6 communities, 38
 
 **Not done, and honest about it:**
 
-- **The agent loop has never run against the live API** — there is no key on the build machine (§8: it is Gurpartap's). Every tool, the contract, the verification and the offline path are tested; the model call itself is not. **Whoever has the key: run `POST /api/cases/demo-114/ask` first and report what happens in §12.** This is the highest-risk untested thing in the repo.
+- **The agent loop has never run against the live API.** There is no key on the build machine (§8: it is Gurpartap's). Every tool, the contract, the verification and the offline path are tested; the model call itself is not. It remains the highest-risk untested thing in the repo.
+
+  **Deliberately deferred — Kanwar's call, 2026-09-04:** *"live test will be done only when every other part will be built by me and jashan."* Do **not** spend the key probing it before then. The reason it can wait is D11: findings, the graph, analytics and custody all work without a model, so nothing downstream is blocked on this answer. The reason it cannot wait forever is that it is a single point of failure on demo day. **Run it once, together, as soon as the front end can display the result — before the 8th, not on it.**
 - `search_web` is a logged stub — no provider chosen.
 - No PDF has been ingested end to end; the reader is written and the demo case is CSV and text.
 - **exposurie** (Kanwar's other project) is paused for this.
 
-**Next, in order:** ① someone with the key exercises `/ask`. ② Jashan starts the front end against §5.6 — nothing blocks it. ③ `docs/demo-script.md`.
+**Next, in order:**
+
+1. **Jashan starts the front end against §5.6.** Nothing blocks it — the API is up and returning real data from the demo case right now. This is the critical path; it is the only workstream with nothing built.
+2. **PDF ingested end to end.** The reader is written but has never seen a real file — the demo case is CSV and text. Real FIRs are PDFs, and a judge handing us one that fails is a bad thirty seconds.
+3. **The two sources in §1.1 with no handler**: *social media intelligence* and *criminal history databases*. Both are named in the problem statement, and §1.1 says every bullet is a checkbox a judge ticks. Cheap to add — a reader and an edge type each.
+4. **`docs/demo-script.md`** (workstream F), once the front end can show something.
+5. **The live API call, last** — see above.
 
 ---
 
