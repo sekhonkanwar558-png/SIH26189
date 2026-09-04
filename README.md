@@ -236,6 +236,22 @@ Beyond that: a citation must click through to the source text (`GET /source`, §
 
 Chat-left / graph-right and Cytoscape.js were the original sketch. **They are a suggestion, not a decision** — they are not in §4 and nothing in the backend depends on either.
 
+### 3.5a Frontend design specification — decided by Jashan, 2026-09-05
+
+The frontend is deliberately calm, light and explicit because investigating officers may not be technical users. It must never look like a dark "hacker" dashboard. Product name: **CaseLens**. Tagline: **"See every connection."** The assistant name is exactly **`shikonye`**, lowercase everywhere, with no avatar or logo.
+
+**Visual foundation:** `#F7F8FA` page, white panels, `#20252B` primary text, `#245B8A` Civic Blue actions, `#C58B2A` Evidence Amber paths and citations, thin light-grey borders, almost no shadow, 10px panel corners, 12px chat bubbles, Inter bundled locally, 16px body text and 14px metadata. Status never relies on colour alone. There is no dark theme.
+
+**Navigation and cases:** labelled white left sidebar, 240px expanded / 72px collapsed, pale-blue selected item, officer identity at the bottom. The case list opens directly and uses searchable detailed list cards ordered by recent activity, simple Status and Case Type filters, a blue **New Case** button, and a collapsed Closed Cases section. New Case is a short centred form; the technical case id is generated and hidden. Edit, Close and Delete live in a three-dot menu; deletion requires typing the case title.
+
+**Case workspace:** labelled case navigation is `shikonye`, Documents, Connections, Findings, Memory, Custody. The default workspace is 60% `shikonye` / 40% Connections with a draggable divider; the assistant may resize from 40% to 75%. Either panel can enter Focus mode. Tablet uses one-at-a-time `shikonye` and Connections tabs.
+
+**Assistant:** a normal WhatsApp/ChatGPT-style continuous conversation with date separators and recent messages first. Both sides use white bubbles distinguished by alignment, borders and sender labels. The composer has no prompt suggestions: only text, document attachment and visible Send. Enter sends, Shift+Enter adds a line, and the input grows to six lines. Attachments show filename, size, detected type, Change Type, Remove and independent progress. Answers expose Copy, View Evidence and Show Path; citations expand under Evidence used. Confidence is High / Medium / Low, never an invented percentage. An unverified answer is hidden behind a clear warning and Retry. `search_web` requires approval for every exact query and reason; results are labelled Web Evidence and never receive case documents.
+
+**Connections:** Cytoscape.js on a white faint-dot canvas, community-grouped force layout, circular icon nodes with soft semantic type tints and three meaningful size levels. Ordinary links are thin light-grey curves; inferred links are dashed. Selecting a result draws `highlight_path` step by step in Evidence Amber and fades unrelated entities; Clear Path remains visible. The toolbar is labelled Search, Filter, Fit, Reset and Legend. Search is always visible. Node details use a right drawer; relationship details use a compact popover. Manual positions and filters are remembered per case on the current device.
+
+**Operational states:** English only; dates use `05 Sep 2026, 14:30`; Indian currency grouping; sensitive phones and accounts are masked until Reveal. Loading uses skeletons plus status text. Errors state what happened and how to recover. Success uses a four-second lower-right toast. Keyboard focus is a 2px Civic Blue ring. Local accessibility settings cover text size, increased light-mode contrast and reduced motion. Fonts, icons and core assets are bundled, so everything except approved web search and live model narration can run with the local backend.
+
 ### 3.6 Hash-chained custody log
 
 Satisfies the **Blockchain & Cybersecurity** theme, honestly.
@@ -309,6 +325,8 @@ What makes a case specific is `case_type` and `brief` on the case itself (`backe
 | D13 | **Centrality is scored on a person-projected graph** | A kingpin whose only edge is `OWNS` to his own SIM scores near zero on the raw graph, because every path stops at the phone. "Who matters" is a question about people; a man and his SIM are not two actors. `nx_adapter.project_people`. | 09-04 |
 | D14 | **The backend builds no UI and makes no design decisions** | Author's call: every visual decision is Jashan's. A "temporary" interface built to test an endpoint anchors decisions that are not the backend's to anchor. §10.1a. | 09-04 |
 | D15 | **Proximity linking is for prose only, and claims the nearest name only** | Both learned by measurement, not opinion. Running co-occurrence over a CDR export links whoever sits in adjacent rows and added 606 meaningless edges, burying the real structure. And linking every person within the window to a nearby number gave Ravi ownership of Manjit's phone, which then produced a real-looking false path. | 09-04 |
+| D16 | **Frontend stack: React + Vite + TypeScript, Tailwind CSS, Radix Primitives, Lucide, Cytoscape.js, TanStack Query and declarative React Router** | Jashan's call after choosing the full interaction system. It keeps the UI local-first, typed and compatible with the frozen HTTP API. | 09-05 |
+| D17 | **Calm Civic Forensic visual language; light mode only** | Officers need an interface that reads like dependable casework, not a technical or "hacker" console. Exact tokens and behavior are in §3.5a. | 09-05 |
 
 ---
 
@@ -483,7 +501,7 @@ Everything is scoped to a case. There is no endpoint that reads across cases exc
 
 ## 6. Repo layout
 
-Actual, as built. `frontend/` does not exist yet — it is Jashan's and nobody else creates it.
+Actual, as built. `frontend/` is Jashan's and remains isolated from the backend implementation.
 
 ```
 backend/
@@ -510,7 +528,10 @@ backend/
     chain.py        the hash chain (§5.4)
   api/
     main.py         FastAPI — §5.6, the front end's contract
-frontend/           JASHAN'S. Does not exist yet. Nobody else creates it.
+frontend/           React + Vite + TypeScript officer interface
+  src/components/   CaseLens shell, accessible dialogs and reusable controls
+  src/pages/        case list and case-workspace routes
+  src/lib/          frozen API client, formatting and local preferences
 data/
   cases/            per-case stores (gitignored)
   synthetic/
@@ -526,7 +547,7 @@ docs/
 
 ## 7. Setup
 
-**Stack:** Python 3.11+ (verified on 3.12) · FastAPI · NetworkX · SQLite · Anthropic SDK. Front-end stack is Jashan's call (§10.1a).
+**Stack:** Python 3.11+ (verified on 3.12) · FastAPI · NetworkX · SQLite · Anthropic SDK. Frontend: Node.js 20.19+ or 22.12+ · React · Vite · TypeScript · Tailwind CSS · Radix Primitives · Lucide · Cytoscape.js · TanStack Query.
 
 **Everything runs from the repo root**, not from `backend/` — `data.synthetic` and `backend.*` are one import tree, and splitting the root breaks it.
 
@@ -540,6 +561,22 @@ cp .env.example .env            # then put the key in .env — see §8
 python -m data.synthetic.generate --case demo-114   # build the demo case (§9)
 python -m pytest tests -q                           # 12 tests, all should pass
 uvicorn backend.api.main:app --reload               # http://127.0.0.1:8000/docs
+```
+
+Run the frontend from a second terminal, still issuing commands from the repository root:
+
+```bash
+pnpm --dir frontend install
+pnpm --dir frontend dev                              # http://127.0.0.1:5173
+```
+
+The Vite development server proxies `/api` to `http://127.0.0.1:8000`. Optional, non-secret officer display values are documented in `frontend/.env.example`. Never put a secret in a `VITE_` variable because Vite exposes it to the browser.
+
+Frontend checks:
+
+```bash
+pnpm --dir frontend build
+pnpm --dir frontend lint
 ```
 
 **It runs without an API key.** Ingest, the graph, analytics, findings and custody need no model at all (D4, D11). `/ask` and `/brief` fall back to a deterministic graph answer and say so in `caveats`. Only the model's narration and multi-step investigation need the key.
@@ -608,7 +645,7 @@ Contracts (§5) are frozen in the first hour so these can run in parallel withou
 | A · Ingest & extraction | PDF/CSV parsing, regex, NER, provenance | Kanwar | **built** |
 | B · Graph & analytics | schema, SQLite store, NetworkX, the four algorithms | Kanwar | **built** |
 | C · Agent & tools | tool implementations, agent loop, answer contract | Kanwar | **built** |
-| **D · Everything the user sees** | **the entire front end and every design decision — see §10.1a** | **Jashan** | `NOT STARTED` |
+| **D · Everything the user sees** | **the entire front end and every design decision — see §10.1a** | **Jashan** | **in progress — foundation and live Cases screen built** |
 | E · Synthetic data | the generator and the planted structure (§9.1) | Kanwar | **built** |
 | F · Custody + demo script | hash chain, `docs/demo-script.md`, the run-through | Kanwar / `UNASSIGNED` | chain built, script not written |
 
@@ -654,9 +691,9 @@ The failure mode of a six-person hackathon is everyone building alone until hour
 
 ## 11. Current state
 
-**Updated 2026-09-04, evening. Whoever changes this project: change this section too.**
+**Updated 2026-09-05. Whoever changes this project: change this section too.**
 
-**The entire backend is built and running. The front end has not been started.**
+**The entire backend is built and running. The frontend foundation and live Cases screen are built; the case workspace is the next milestone.**
 
 | Part | State |
 |---|---|
@@ -667,7 +704,7 @@ The failure mode of a six-person hackathon is everyone building alone until hour
 | Custody — hash chain, tamper detection | **built, tested** |
 | API — every endpoint in §5.6 | **built**, returning real data |
 | Demo case — generator + planted ground truth | **built, tested** |
-| **Front end** | **NOT STARTED — Jashan's, see §10.1a** |
+| **Front end** | **in progress — React foundation, design tokens, live Cases list, case CRUD controls, persisted officer/accessibility settings, loading/empty/error states built** |
 | `docs/demo-script.md` | **NOT WRITTEN** — workstream F |
 
 **Verified against the demo case**, `python -m pytest tests -q` → **12 passed**:
@@ -691,7 +728,7 @@ Demo case, for scale: **94 entities, 1,087 links, 6 documents, 6 communities, 38
 
 **Next, in order:**
 
-1. **Jashan starts the front end against §5.6.** Nothing blocks it — the API is up and returning real data from the demo case right now. This is the critical path; it is the only workstream with nothing built.
+1. **Jashan builds the live case workspace against §5.6.** The Cases screen is complete. Next is the 60/40 `shikonye` + Connections split with real `/brief`, `/ask`, `/graph`, source and node-detail behavior.
 2. **PDF ingested end to end.** The reader is written but has never seen a real file — the demo case is CSV and text. Real FIRs are PDFs, and a judge handing us one that fails is a bad thirty seconds.
 3. **The two sources in §1.1 with no handler**: *social media intelligence* and *criminal history databases*. Both are named in the problem statement, and §1.1 says every bullet is a checkbox a judge ticks. Cheap to add — a reader and an edge type each.
 4. **`docs/demo-script.md`** (workstream F), once the front end can show something.
@@ -712,6 +749,8 @@ Append one line per session. What you built · what you changed in this file · 
   - **§7 setup was wrong and is corrected** — everything runs from the repo root (`uvicorn backend.api.main:app`), not from `backend/`. `numpy` and `scipy` are required (NetworkX pagerank needs them). spaCy is genuinely optional.
   - **Three bugs found by measurement, worth not reintroducing** (D15): co-occurrence linking run over a CDR export created 606 meaningless edges and buried the real structure; the ownership heuristic gave one man another man's phone and produced a plausible false path; a name pattern crossed a full stop and merged two people into `person:manjit_singh_accused_sukhwinder`.
   - **Untested:** the live API call. No key on the build machine, and **deferred on purpose** until the rest is built (§11) — nothing downstream is blocked on it, because findings, the graph, analytics and custody all work with no model at all (D11).
+
+- **2026-09-05 (Jashan + Codex)** — **frontend milestone 1 built.** Added the React + Vite + TypeScript application in `frontend/`, bundled Inter locally, established the Calm Civic Forensic tokens, added the 240px/72px desktop sidebar and labelled tablet drawer, and connected the Cases screen to the real `/api/cases` endpoint. Search and filters, detailed case cards, create/edit/pause/close/delete controls, typed-title delete confirmation, persisted officer and accessibility settings, skeleton/empty/reconnect states and four-second success feedback are implemented. Browser QA created a temporary case through the real API, verified it appeared first, then removed that exact temporary case through typed-title confirmation; desktop and tablet layouts have zero browser console errors. `pnpm --dir frontend build`, `pnpm --dir frontend lint` and all 12 backend tests pass. §3.5a records Jashan's locked design direction; D16–D17 record the frontend stack and visual language. Next: replace the temporary case route with the live 60/40 `shikonye` + Connections workspace.
 
 ---
 
