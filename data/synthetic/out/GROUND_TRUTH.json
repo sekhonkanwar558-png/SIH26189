@@ -1,0 +1,38 @@
+{
+  "note": "What we planted. The demo proves the system found these without being told.",
+  "kingpin": {
+    "name": "Harbhajan Dhillon",
+    "phone": "9814009977",
+    "claim": "Named in no FIR, statement or surveillance note. Reachable only through betweenness on CDR metadata. Contacts the two intermediaries and nobody else."
+  },
+  "intermediaries": [
+    "Jaswant Rai",
+    "Balraj Thind"
+  ],
+  "clusters": {
+    "ludhiana": [
+      "Ravi Kumar",
+      "Manjit Singh",
+      "Sukhwinder Kaur",
+      "Gurpreet Singh"
+    ],
+    "delhi": [
+      "Suneel Kumar",
+      "Parminder Sethi",
+      "Nisha Rani",
+      "Amarjit Chadha"
+    ]
+  },
+  "financial_crossing": "Manjit Singh -> Gill Travels -> Suneel Kumar, the only money route between the two clusters.",
+  "tower_colocation": {
+    "tower": "LDH-014",
+    "when": "2026-08-03T22:10:00+05:30",
+    "phones": [
+      "9876543210 (Ravi Kumar)",
+      "9971204418 (Suneel Kumar)"
+    ],
+    "claim": "Proximity, not contact. There is no call between these two numbers."
+  },
+  "spike": "Six hours before 03 Aug 22:10, Ludhiana-side call volume rises sharply.",
+  "handset_swap": "One IMEI carries 9814009977 and 9814003311 \u2014 the kingpin changing SIMs."
+}

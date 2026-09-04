@@ -1,0 +1,25 @@
+# SIH26189 backend. Python 3.11+ (verified on 3.12).
+# Pinned loosely on purpose: six people install this on six machines in one
+# night, and a hard pin that fails to build is worse than a minor version drift.
+
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9      # multipart file upload
+pydantic>=2.7
+python-dotenv>=1.0           # reads .env; the API key never leaves it (README §8)
+
+networkx>=3.3                # graph + every algorithm in §3.3, incl. Louvain
+numpy>=1.26                  # required by networkx pagerank
+scipy>=1.11                  # required by networkx pagerank
+
+pypdf>=4.2                   # PDF text extraction with offsets
+
+anthropic>=1.0               # the case agent (§3.4). claude-sonnet-5, D5.
+
+pytest>=8.0
+httpx>=0.27                  # fastapi TestClient
+
+# OPTIONAL — adds NER recall on top of the always-on cue patterns (§3.1).
+# The system runs, and the demo passes, without it.
+#   pip install spacy && python -m spacy download en_core_web_sm
+# spacy>=3.7

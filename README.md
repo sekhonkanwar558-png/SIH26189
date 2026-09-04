@@ -45,8 +45,12 @@ You are likely to write these from memory and be wrong. They cause silent failur
 | `output_format: {...}` | `output_config: {format: {...}}` |
 | A date-suffixed model id | The model string is exactly `claude-sonnet-5` — no date suffix |
 | `client.messages.create` loop written by hand | Prefer `client.beta.messages.tool_runner` with `@beta_tool` — it drives the tool loop for us |
+| `client.messages.parse(output_config=...)` | The **helper** takes `output_format=<PydanticModel>`; **`messages.create` and `tool_runner` take `output_config={"format": {...}}`**. Both exist, they are not interchangeable, and mixing them is a 400 |
+| `tool_runner` can't do structured output | It can — it accepts `output_config`, `thinking`, `system` and `max_iterations`. `runner.until_done()` returns the final message. Verified against `anthropic` 1.3.0 |
 
 If you are unsure about an Anthropic API shape, **do not guess** — check the official docs rather than your recollection.
+
+**Two things this project does that are not the model's job, and must not be moved into a prompt:** citations are verified against the real graph in code after the model answers (`agent/contract.py`), and findings are computed from the graph before the model sees them (`analytics/anomalies.py`). Asking a prompt to be truthful is not the same as checking.
 
 ---
 
@@ -224,9 +228,13 @@ Model: `claude-sonnet-5`, adaptive thinking. Overridable via `ANTHROPIC_MODEL`.
 
 ### 3.5 Split-screen UI
 
-Chat on the left, live knowledge graph on the right. When the agent answers, **the exact path it used lights up on the right**. The highlight is not decoration — it is a render of `highlight_path` from the answer contract, so it is literally the reasoning.
+**This section is Jashan's, and it is the only part of §3 that is.** What follows is the one *behavioural* requirement the architecture places on the front end. Everything else — layout, library, look, motion, the lot — is his call (§10.1a, D14).
 
-Cytoscape.js for the graph. Clicking any node opens that entity's profile: its attributes, its edges, and every document it was extracted from.
+**The requirement:** when the agent answers, **the exact path it used lights up**. `highlight_path` in the answer contract (§5.3) is an ordered list of node ids, and rendering exactly those is what makes the split screen *the reasoning* rather than a picture next to some text. A judge will probe this (D3). Everything else about how the graph is drawn is a design decision.
+
+Beyond that: a citation must click through to the source text (`GET /source`, §5.6), and a node must open its profile (`GET /nodes/{id}` returns attributes, edges, neighbours and every document it was extracted from). Both endpoints exist and return real data now.
+
+Chat-left / graph-right and Cytoscape.js were the original sketch. **They are a suggestion, not a decision** — they are not in §4 and nothing in the backend depends on either.
 
 ### 3.6 Hash-chained custody log
 
@@ -250,6 +258,34 @@ Follow this when you're unsure how your piece connects to the rest.
 8. **UI** animates exactly that path on the right. Citations on the left click through to the FIR page they came from.
 9. **Custody log** records the question, the tools called, and the answer, hash-linked.
 
+### 3.8 The part that makes it an assistant and not a search box
+
+Added 2026-09-04 (D10, D11). The brief that produced it, in Kanwar's words:
+
+> *"a personal ai assistant or bot working intelligently under an officer and really making the cases solve with its intelligent and curious bot working under him, so the officer no needs to go through pages anymore, it should really helppp"*
+>
+> *"it shouldnt just be system prompt calling claude, it will be everything which we do on our behalf peakkk, not just a prompt"*
+
+A system that only answers questions still requires the officer to know what to ask. Three mechanisms, none of them a prompt:
+
+**1. It volunteers.** After every ingest, `analytics/anomalies.py` computes **findings** — deterministic, ranked by how much they should change the officer's next hour, each carrying the node and edge ids it rests on. `GET /brief` is what the agent says without being asked: what changed, what it now believes, what it wants next.
+
+**Findings are computed from the graph, not written by the model.** The model narrates and investigates them; it never invents one. That is D3 enforced structurally, and it is also why the assistant still works with no API key, no network and no budget — which on the demo machine at 11:00 on the 9th is not a hypothetical.
+
+What it looks for: a **hidden broker** (high betweenness, few contacts, named in no report — the headline demo beat), a **single point of contact** joining two clusters, **handset swaps** (one IMEI, several SIMs), **one-way accounts**, **outlier transfers**, **volume spikes** against a node's own baseline, and numbers that **went silent**.
+
+**2. It remembers.** Every case has an `agent_memory` table: conclusions it reached, questions it is still holding, evidence it has asked for, and what it has already briefed — so it does not repeat itself. The officer never re-explains the case.
+
+**3. It acts.** The agent's tools include `record_conclusion`, `open_question` and `request_evidence` (§5.2), all custody-logged. "I don't have it, and here is the exact document that would settle it" is a good answer; inventing a plausible one is the only unforgivable failure.
+
+**And it verifies itself.** Every answer passes through `contract.verify()` before it reaches the officer: each cited id is checked against the real graph, anything that does not exist is stripped and reported, and an answer left with no citations is flagged as unreliable rather than shown as prose. A model that hallucinates `e_9999` gets caught by us, not by a judge.
+
+### 3.9 One engine, every kind of case
+
+**Nothing in ingest, the graph, the analytics or the agent knows what kind of crime it is looking at.** They know identifiers, links, timing and structure — which every investigation has. The demo is a trafficking case because the evaluating department is NCRB Women Safety Division (D7), and for no other reason.
+
+What makes a case specific is `case_type` and `brief` on the case itself (`backend/case.py`) — the officer's own words, threaded into the agent's context on every turn. The same engine reasons like a fraud analyst on a fraud case and a homicide analyst on a homicide, because the graph supplies the facts and the case supplies what kind of facts they are. A test asserts this: `test_two_cases_of_different_kinds_share_nothing` builds a vendor-invoice-fraud case beside the trafficking one and checks both that the engine works on it and that nothing crosses.
+
 ---
 
 ## 4. Decisions
@@ -267,6 +303,12 @@ Follow this when you're unsure how your piece connects to the rest.
 | D7 | **Demo case is trafficking / repeat-offender** | The department is NCRB **Women Safety Division**. Same code, story built for the actual evaluators. | 09-04 |
 | D8 | **Synthetic data only, with a planted structure** | No public FIR/CDR corpus exists and real crime data would be a legal problem. Planting a known hidden network is what makes the demo provable. See §9. | 09-04 |
 | D9 | **This README is the only shared context file. No pointer file.** | Author's call: every collaborator tells their own agent to read this file directly. | 09-04 |
+| D10 | **The agent acts, it does not just answer** | *"it shouldnt just be system prompt calling claude… not just a prompt."* It volunteers findings after every ingest, keeps per-case memory across sessions, records conclusions, holds open questions, and names the evidence it needs. §3.8. | 09-04 |
+| D11 | **Findings are computed from the graph; the model narrates them** | Keeps D3 structurally true, and keeps the assistant useful with no key, no network and no budget — the state the demo machine may be in. | 09-04 |
+| D12 | **The engine is crime-type agnostic; the case carries its own type and brief** | *"it should work for any case… so it mold in every case possible."* Nothing in ingest, graph, analytics or the agent knows what trafficking is. §3.9. | 09-04 |
+| D13 | **Centrality is scored on a person-projected graph** | A kingpin whose only edge is `OWNS` to his own SIM scores near zero on the raw graph, because every path stops at the phone. "Who matters" is a question about people; a man and his SIM are not two actors. `nx_adapter.project_people`. | 09-04 |
+| D14 | **The backend builds no UI and makes no design decisions** | Author's call: every visual decision is Jashan's. A "temporary" interface built to test an endpoint anchors decisions that are not the backend's to anchor. §10.1a. | 09-04 |
+| D15 | **Proximity linking is for prose only, and claims the nearest name only** | Both learned by measurement, not opinion. Running co-occurrence over a CDR export links whoever sits in adjacent rows and added 606 meaningless edges, burying the real structure. And linking every person within the window to a nearby number gave Ravi ownership of Manjit's phone, which then produced a real-looking false path. | 09-04 |
 
 ---
 
@@ -295,6 +337,10 @@ Follow this when you're unsure how your piece connects to the rest.
 `id` is `{type}:{normalised_value}` and is stable — the same entity always produces the same id.
 
 `type` is one of: `person` · `phone` · `organization` · `location` · `vehicle` · `account` · `device` · `event` · `document`
+
+**One exception to the id rule, and it comes from this section's own examples:** document nodes use the prefix `doc:` (`doc:fir_114_001`), not `document:`, because `sources[].doc_id`, `custody.ref` and `read_source_doc` all speak that form. `schema.ID_PREFIX` is the single place that knows it. *(Clarification of an inconsistency that was already in this contract — not a change. Nothing needed altering in code or in §5.4.)*
+
+**Normalisation, so two agents produce the same id for the same fact:** phones become `91` + ten digits, so `9876543210`, `98765-43210`, `+91 98765 43210` and `09876543210` are one node. People are lowercased, honorific-stripped and underscore-joined. Vehicles and IMEIs drop *all* separators (`PB 10 AB 1234` and `PB10AB1234` are one vehicle). Everything else is lowercased with runs of non-alphanumerics becoming `_`.
 
 **Edge**
 
@@ -333,7 +379,19 @@ Every tool is scoped to a single case. Every tool returns IDs the agent must cit
 | `read_source_doc` | `(doc_id: str, start: int = None, end: int = None)` | `{text, doc_id, start, end}` |
 | `search_web` | `(query: str)` | `[{title, url, snippet}]` — OSINT only, never case data |
 
-`search_web` is the one tool that leaves the machine. **Never send case content to it** — send only entity names or identifiers that the officer has already made public, and log every call to the custody chain.
+`search_web` is the one tool that leaves the machine. **Never send case content to it** — send only entity names or identifiers that the officer has already made public, and log every call to the custody chain. *(Implemented as a logged stub — no provider is wired up. It returns a message saying so. That is deliberate: the boundary is in place, the provider is a decision nobody has made.)*
+
+**Act tools** — added 2026-09-04, D10. The tools above let the agent *read*. These let it *work*, and they are the difference between an assistant and a search box:
+
+| Tool | Signature | Does |
+|---|---|---|
+| `record_conclusion` | `(text, node_ids, edge_ids, confidence)` | writes something it worked out into case memory, so it is still known next week |
+| `open_question` | `(text, what_would_answer_it)` | holds something it could not settle; re-checked as documents arrive |
+| `request_evidence` | `(what, why)` | names the missing document that is blocking an answer |
+| `recall` | `(query, kind)` | reads its own earlier conclusions so it never repeats itself |
+| `case_overview` | `()` | orients it at the start of a run: counts, documents, findings, open threads |
+
+Everything these write lands in `agent_memory` in the case's own `graph.db`, and every one is logged to the custody chain as `infer`. **The officer can ask "why do you think that" a month later and get the same answer, with the same citations.**
 
 ### 5.3 Answer contract — the agent → UI boundary
 
@@ -384,53 +442,115 @@ data/cases/{case_id}/
 
 Nothing outside `data/cases/{case_id}/` is readable by that case's agent. **This is the isolation guarantee — do not add a shared store that spans cases.**
 
+### 5.6 HTTP API — FROZEN, and this is the front end's contract
+
+**Built and running.** Start it (§7) and open `http://127.0.0.1:8000/docs` for the live schema. Every endpoint below already returns real data from the demo case.
+
+Everything is scoped to a case. There is no endpoint that reads across cases except `GET /api/cases`, which reads metadata only.
+
+| Method | Path | Returns |
+|---|---|---|
+| `GET` | `/api/health` | `{ok, model, model_available, ner, cases}` — never the key |
+| `GET` | `/api/cases?officer=` | `[CaseMeta + counts]` — one officer, several cases |
+| `POST` | `/api/cases` | create: `{case_id, title, officer, case_type, brief}` |
+| `GET` | `/api/cases/{id}` | meta + counts + documents + custody verification |
+| `PATCH` | `/api/cases/{id}` | update title / case_type / brief / status |
+| `DELETE` | `/api/cases/{id}?confirm={id}` | deletes the case directory |
+| `POST` | `/api/cases/{id}/documents` | multipart upload → `{document, analytics, counts}` |
+| `POST` | `/api/cases/{id}/documents/text` | `{filename, text, kind}` → same shape |
+| `GET` | `/api/cases/{id}/documents` | every document with kind, sha256, size |
+| `GET` | `/api/cases/{id}/source?doc_id=&start=&end=` | **the text behind a citation** |
+| `GET` | `/api/cases/{id}/graph?include_documents=false` | `{nodes, edges, counts}` — the whole graph |
+| `GET` | `/api/cases/{id}/nodes/{node_id}` | entity profile: attrs, edges, neighbours, source documents |
+| `GET` | `/api/cases/{id}/path?a=&b=&max_hops=6` | `[{path, labels, edges, length}]` |
+| `GET` | `/api/cases/{id}/timeline?node_id=&start=&end=` | `[{ts, edge_id, summary}]` |
+| `GET` | `/api/cases/{id}/analytics?metric=&limit=` | `{influencers, communities, anomalies, findings}` |
+| `POST` | `/api/cases/{id}/analytics/recompute` | forces a recompute |
+| `POST` | `/api/cases/{id}/ask` | `{question}` → **the §5.3 answer contract** |
+| `GET` | `/api/cases/{id}/brief` | what the agent says unprompted (§3.8) |
+| `POST` | `/api/cases/{id}/findings/{fid}/investigate` | works one finding → §5.3 |
+| `GET` | `/api/cases/{id}/memory?kind=&status=` | the agent's conclusions, questions, requests |
+| `POST` | `/api/cases/{id}/memory/{mem_id}/close` | mark one resolved |
+| `GET` | `/api/cases/{id}/custody?limit=` | `{verification, entries}` — §9.3 lives here |
+
+**Three things the front end should know about the shapes:**
+
+1. **`/ask` and `/brief` return §5.3 plus a `verified` block** — `{ok, dropped_nodes, dropped_edges}`. The backend has already checked every citation against the graph and stripped any that did not exist. **If `verified.ok` is false, show that** — an answer whose citations failed is not an answer, and hiding it is the one thing that would make this dishonest.
+2. **`/brief` returns deterministic findings *and* a narrative.** `findings` comes from the graph and is always present, even with no API key and no network. `narrative` is the model's version. If the model is unavailable the narrative says so in `caveats` and the findings still stand — design for that state, it is the one the demo machine may be in.
+3. **`highlight_path` is the render instruction.** It is an ordered list of node ids. Lighting exactly those, in order, is what makes the split screen the reasoning rather than a decoration (D3).
+
 ---
 
 ## 6. Repo layout
 
+Actual, as built. `frontend/` does not exist yet — it is Jashan's and nobody else creates it.
+
 ```
 backend/
-  ingest/       pdf, regex extractors, NER, provenance
-  graph/        schema, sqlite store, networkx adapter
-  analytics/    centrality, communities, anomalies
-  agent/        tool definitions, agent loop, answer contract
-  custody/      hash chain
-  api/          FastAPI routes
-frontend/
-  app/          Next.js
-  components/   chat, graph canvas, entity panel
+  config.py         paths, model id, the case-id guard (all case paths come from here)
+  case.py           case lifecycle: create/read/update/list, case_type + brief
+  ingest/
+    readers.py      pdf/csv/txt -> text with stable offsets
+    patterns.py     deterministic identifiers: phone, IMEI, a/c, IFSC, vehicle, FIR, dates
+    ner.py          role-cue patterns (always on) + spaCy (optional, adds recall)
+    structured.py   CDR + bank rows -> typed edges, with the direction table
+    pipeline.py     the orchestrator: doc -> nodes/edges -> custody -> analytics
+  graph/
+    schema.py       §5.1 frozen contract, id normalisation, the no-source rule
+    store.py        one SQLite file per case; nodes, edges, docs, analytics, agent_memory
+    nx_adapter.py   NetworkX views, path finding, project_people (D13)
+  analytics/
+    metrics.py      betweenness, pagerank, degree, Louvain, the `why` strings
+    anomalies.py    spikes, handset swaps, one-way accounts + the findings layer (§3.8)
+  agent/
+    tools.py        §5.2 read tools + the act tools
+    contract.py     §5.3 schema and verify() — the citation check
+    loop.py         ask / brief / investigate, tool_runner, offline fallback
+  custody/
+    chain.py        the hash chain (§5.4)
+  api/
+    main.py         FastAPI — §5.6, the front end's contract
+frontend/           JASHAN'S. Does not exist yet. Nobody else creates it.
 data/
-  cases/        per-case stores (gitignored)
-  synthetic/    the demo case generator + its output
+  cases/            per-case stores (gitignored)
+  synthetic/
+    generate.py     the demo case generator + the planted ground truth
+    out/            the generated CSVs, FIRs and GROUND_TRUTH.json
+tests/
+  test_core.py      12 tests, incl. the planted-truth assertions
 docs/
-  demo-script.md
+  demo-script.md    NOT WRITTEN — workstream F
 ```
 
 ---
 
 ## 7. Setup
 
-**Stack:** Python 3.11 · FastAPI · NetworkX · SQLite · spaCy · Next.js · Cytoscape.js · Anthropic SDK.
+**Stack:** Python 3.11+ (verified on 3.12) · FastAPI · NetworkX · SQLite · Anthropic SDK. Front-end stack is Jashan's call (§10.1a).
+
+**Everything runs from the repo root**, not from `backend/` — `data.synthetic` and `backend.*` are one import tree, and splitting the root breaks it.
 
 ```bash
-# backend
-cd backend
-python -m venv .venv && source .venv/bin/activate    # Windows: .venv\Scripts\activate
+python -m venv .venv
+.venv\Scripts\activate          # Windows;  source .venv/bin/activate  elsewhere
 pip install -r requirements.txt
-python -m spacy download en_core_web_sm
-cp .env.example .env        # then put the key in .env — see §8
-uvicorn api.main:app --reload
 
-# frontend
-cd frontend
-npm install
-npm run dev
+cp .env.example .env            # then put the key in .env — see §8
 
-# generate the demo case
-python -m data.synthetic.generate --case demo-114
+python -m data.synthetic.generate --case demo-114   # build the demo case (§9)
+python -m pytest tests -q                           # 12 tests, all should pass
+uvicorn backend.api.main:app --reload               # http://127.0.0.1:8000/docs
 ```
 
-`UNKNOWN` until the first code lands — if you are the agent that creates these files, correct this section in the same commit.
+**It runs without an API key.** Ingest, the graph, analytics, findings and custody need no model at all (D4, D11). `/ask` and `/brief` fall back to a deterministic graph answer and say so in `caveats`. Only the model's narration and multi-step investigation need the key.
+
+**spaCy is optional** and not in `requirements.txt`. The always-on cue patterns handle FIR prose; spaCy adds recall on documents shaped differently:
+
+```bash
+pip install spacy && python -m spacy download en_core_web_sm
+```
+
+`GET /api/health` reports which NER layers are live and whether a model is reachable — it never reports the key.
 
 ---
 
@@ -483,16 +603,31 @@ Open the custody log, show every ingest and inference hash-linked, alter one ent
 
 Contracts (§5) are frozen in the first hour so these can run in parallel without meeting until integration.
 
-| Workstream | Scope | Owner |
-|---|---|---|
-| A · Ingest & extraction | PDF/CSV parsing, regex, NER, provenance | `UNASSIGNED` |
-| B · Graph & analytics | schema, SQLite store, NetworkX, the four algorithms | `UNASSIGNED` |
-| C · Agent & tools | tool implementations, agent loop, answer contract | `UNASSIGNED` |
-| D · UI | split screen, Cytoscape canvas, highlight, entity panel | `UNASSIGNED` |
-| E · Synthetic data | the generator and the planted structure (§9.1) | `UNASSIGNED` |
-| F · Custody + demo script | hash chain, `docs/demo-script.md`, the run-through | `UNASSIGNED` |
+| Workstream | Scope | Owner | State |
+|---|---|---|---|
+| A · Ingest & extraction | PDF/CSV parsing, regex, NER, provenance | Kanwar | **built** |
+| B · Graph & analytics | schema, SQLite store, NetworkX, the four algorithms | Kanwar | **built** |
+| C · Agent & tools | tool implementations, agent loop, answer contract | Kanwar | **built** |
+| **D · Everything the user sees** | **the entire front end and every design decision — see §10.1a** | **Jashan** | `NOT STARTED` |
+| E · Synthetic data | the generator and the planted structure (§9.1) | Kanwar | **built** |
+| F · Custody + demo script | hash chain, `docs/demo-script.md`, the run-through | Kanwar / `UNASSIGNED` | chain built, script not written |
 
 **Roster is `UNKNOWN`.** Known so far: **Jashan Garg** (repo owner), **Kanwar Sekhon**, **Gurpartap** (holds the API key). SIH requires six with at least one woman. **Whoever knows the full roster: fill this table in and delete this line.**
+
+### 10.1a The split — read this before you write a line of code
+
+**There are two halves of this project and they do not overlap.**
+
+**Jashan owns everything the user sees.** Not "the UI layer" — *everything visual*. Layout, typography, colour, spacing, motion, the split-screen proportions, how the graph is drawn, what a node looks like, how a citation renders, how the chat reads, the entity panel, the case list, empty states, loading states, error states, the whole visual language. **Every design decision in this project is his.** There is no design system handed down from the backend, no reference mockup, no "we already picked the colours". Nobody has, and nobody is going to.
+
+**Kanwar owns everything underneath.** Ingest, the graph, analytics, the agent, custody, and the HTTP API. That half is built (§11).
+
+**Consequences, both directions:**
+
+- **If you are Jashan's agent:** the backend is done and running. You do not need to wait for anyone, and you do not need to ask what anything should look like — that is your call, entirely. **§5.6 is your contract**: every endpoint, every shape, already frozen and already returning real data from the demo case. Build against it. If you need a field that does not exist, say so and it gets added — do not invent a second API, and do not reshape the data in the client to work around a missing endpoint.
+- **If you are Kanwar's agent (or anyone working the backend):** **do not build UI, and do not make design decisions.** No pages, no components, no CSS, no colour choices, no "temporary" front end to test against, no HTML mock so we can see it working. Test with `pytest`, `curl` and `/docs`. Producing a scrappy interface "just to check the endpoint" takes the decision out of Jashan's hands by anchoring it, and it is not yours to anchor. The one thing the backend owes the front end is a clean, honest, documented API — that is in §5.6.
+
+**Where the boundary literally is:** `frontend/` is Jashan's, and nothing outside it is. `backend/`, `data/` and `tests/` are the backend's. The README belongs to whoever is changing something, and §12 records it.
 
 ### 10.2 Before the 8th
 
@@ -519,13 +654,40 @@ The failure mode of a six-person hackathon is everyone building alone until hour
 
 ## 11. Current state
 
-**Updated 2026-09-04. Whoever changes this project: change this section too.**
+**Updated 2026-09-04, evening. Whoever changes this project: change this section too.**
 
-- **Repo:** README only. No code has been written yet.
-- **Architecture:** agreed (§3). **Contracts:** written and frozen (§5) — not yet exercised by code.
-- **Roster:** `UNKNOWN` — see §10.1.
-- **Next:** the team's first working session. Assign §10.1, then build the synthetic generator (§9.1) first, because everything else is tested against its output.
+**The entire backend is built and running. The front end has not been started.**
+
+| Part | State |
+|---|---|
+| Ingest — PDF/CSV/text, regex identifiers, cue NER, provenance | **built, tested** |
+| Graph — SQLite per case, §5.1 schema, idempotent merge | **built, tested** |
+| Analytics — betweenness, pagerank, degree, Louvain, anomalies, findings | **built, tested** |
+| Agent — 9 read tools + 5 act tools, tool loop, §5.3 contract, self-verification | **built**, exercised offline |
+| Custody — hash chain, tamper detection | **built, tested** |
+| API — every endpoint in §5.6 | **built**, returning real data |
+| Demo case — generator + planted ground truth | **built, tested** |
+| **Front end** | **NOT STARTED — Jashan's, see §10.1a** |
+| `docs/demo-script.md` | **NOT WRITTEN** — workstream F |
+
+**Verified against the demo case**, `python -m pytest tests -q` → **12 passed**:
+
+- The kingpin is named in **no report** — only in CDR metadata — and the system **leads with him**: *"Harbhajan Dhillon connects this network but appears in no report."* (§9.2 query 2.)
+- Ravi reaches the Delhi account **through the tower co-location**, and there is provably no call between the two numbers, so the system cannot claim contact. (§9.2 query 1.)
+- Two cases of **different kinds** (trafficking, vendor fraud) share nothing.
+- Altering one custody entry **breaks the chain at that entry**. (§9.3.)
+- A 40-page document ingests and re-runs all analytics in **well under a second**.
+
+Demo case, for scale: **94 entities, 1,087 links, 6 documents, 6 communities, 38 anomalies, 20 findings.**
+
+**Not done, and honest about it:**
+
+- **The agent loop has never run against the live API** — there is no key on the build machine (§8: it is Gurpartap's). Every tool, the contract, the verification and the offline path are tested; the model call itself is not. **Whoever has the key: run `POST /api/cases/demo-114/ask` first and report what happens in §12.** This is the highest-risk untested thing in the repo.
+- `search_web` is a logged stub — no provider chosen.
+- No PDF has been ingested end to end; the reader is written and the demo case is CSV and text.
 - **exposurie** (Kanwar's other project) is paused for this.
+
+**Next, in order:** ① someone with the key exercises `/ask`. ② Jashan starts the front end against §5.6 — nothing blocks it. ③ `docs/demo-script.md`.
 
 ---
 
@@ -534,6 +696,14 @@ The failure mode of a six-person hackathon is everyone building alone until hour
 Append one line per session. What you built · what you changed in this file · what the next agent needs to know.
 
 - **2026-09-04** — README created. Problem statement recorded verbatim from sih.gov.in; architecture, decisions D1–D9 and contracts §5.1–5.5 written from the 09-03/09-04 design discussion. No code yet. Roster still unknown.
+
+- **2026-09-04, evening (Kanwar + Claude)** — **the whole backend, built and tested.** Ingest, graph, analytics, agent, custody, API, demo generator, 12 tests. What the next agent needs to know:
+  - **Front end is untouched and is Jashan's** — every visual and design decision, not just "the UI layer". New **§10.1a** says so explicitly and **§5.6** is the frozen API he builds against. The backend deliberately built no interface of any kind (**D14**).
+  - **New decisions D10–D15.** The agent acts rather than only answering (§3.8); findings are computed from the graph so the system works offline (D11); the engine is crime-type agnostic and the case carries its own type and brief (D12, §3.9); centrality runs on a person-projected graph (D13).
+  - **Two contract clarifications, no contract changes.** §5.1 now records the `doc:` prefix exception that was already in its own examples, and the id-normalisation rules. §5.2 gained the act tools.
+  - **§7 setup was wrong and is corrected** — everything runs from the repo root (`uvicorn backend.api.main:app`), not from `backend/`. `numpy` and `scipy` are required (NetworkX pagerank needs them). spaCy is genuinely optional.
+  - **Three bugs found by measurement, worth not reintroducing** (D15): co-occurrence linking run over a CDR export created 606 meaningless edges and buried the real structure; the ownership heuristic gave one man another man's phone and produced a plausible false path; a name pattern crossed a full stop and merged two people into `person:manjit_singh_accused_sukhwinder`.
+  - **Untested:** the live API call. No key on the build machine. See §11.
 
 ---
 
