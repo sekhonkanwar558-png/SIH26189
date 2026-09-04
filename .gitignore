@@ -1,0 +1,8 @@
+.env
+.env.local
+__pycache__/
+.venv/
+node_modules/
+.next/
+data/cases/
+*.pyc
