@@ -673,7 +673,7 @@ Contracts (§5) are frozen in the first hour so these can run in parallel withou
 | A · Ingest & extraction | PDF/CSV parsing, regex, NER, provenance | Kanwar | **built** |
 | B · Graph & analytics | schema, SQLite store, NetworkX, the four algorithms | Kanwar | **built** |
 | C · Agent & tools | tool implementations, agent loop, answer contract | Kanwar | **built** |
-| **D · Everything the user sees** | **the entire front end and every design decision — see §10.1a** | **Jashan** | **in progress — foundation and live Cases screen built** |
+| **D · Everything the user sees** | **the entire front end and every design decision — see §10.1a** | **Jashan** (design language, Cases screen) · **Kanwar** (case workspace, 09-05 — see §10.1b) | **built** — every section of §3.5a is live against §5.6 |
 | E · Synthetic data | the generator and the planted structure (§9.1) | Kanwar | **built** |
 | F · Custody + demo script | hash chain, `docs/demo-script.md`, the run-through | Kanwar / `UNASSIGNED` | chain built, script not written |
 
@@ -693,6 +693,18 @@ Contracts (§5) are frozen in the first hour so these can run in parallel withou
 - **If you are Kanwar's agent (or anyone working the backend):** **do not build UI, and do not make design decisions.** No pages, no components, no CSS, no colour choices, no "temporary" front end to test against, no HTML mock so we can see it working. Test with `pytest`, `curl` and `/docs`. Producing a scrappy interface "just to check the endpoint" takes the decision out of Jashan's hands by anchoring it, and it is not yours to anchor. The one thing the backend owes the front end is a clean, honest, documented API — that is in §5.6.
 
 **Where the boundary literally is:** `frontend/` is Jashan's, and nothing outside it is. `backend/`, `data/` and `tests/` are the backend's. The README belongs to whoever is changing something, and §12 records it.
+
+### 10.1b The workspace half moved to Kanwar — 2026-09-05
+
+**Everything in §10.1a above was true until this section, and one part of it no longer is.** Kanwar's call on the evening of 09-05, three days before the internal round: **his side built the case workspace** — the `shikonye` conversation, Connections, Documents, Findings, Memory and Custody — because the Cases screen was the only screen that existed and the workspace is what a judge is actually shown.
+
+**This does not un-assign the front end from Jashan, and it changes nothing about §3.5a.** The workspace was built *to* his specification, not around it: CaseLens, `shikonye` lowercase with no avatar, the Calm Civic Forensic palette, light-only, 60/40 split with a 40–75% draggable divider, focus mode, tablet tabs, masked identifiers until Reveal, four-second toasts, skeletons and stated error states. The design decisions in §3.5a were his and were followed; none were re-taken.
+
+**What this means for whoever picks up next:**
+
+- **Do not rebuild the workspace.** It exists, it runs against the real API, and §11 lists what it covers. Change it, and change §11 with it.
+- **Design changes are still Jashan's call.** If the workspace looks wrong to him, his judgement wins over what is there — §3.5a is still the specification, and this is still his front end.
+- **The split in §10.1a otherwise stands.** The backend still builds no UI on its own initiative; this was an explicit instruction from Kanwar, not a drift.
 
 ### 10.2 Before the 8th
 
@@ -721,7 +733,7 @@ The failure mode of a six-person hackathon is everyone building alone until hour
 
 **Updated 2026-09-05. Whoever changes this project: change this section too.**
 
-**The entire backend is built and running. The frontend foundation and live Cases screen are built; the case workspace is the next milestone.**
+**The entire backend is built and running. The front end is built — Cases screen and the full case workspace, live against the real API. `docs/demo-script.md` and the live model call are what is left.**
 
 | Part | State |
 |---|---|
@@ -733,7 +745,8 @@ The failure mode of a six-person hackathon is everyone building alone until hour
 | Custody — hash chain, tamper detection | **built, tested** |
 | API — every endpoint in §5.6 | **built**, returning real data |
 | Demo case — generator + planted ground truth | **built, tested** |
-| **Front end** | **in progress — React foundation, design tokens, live Cases list, case CRUD controls, persisted officer/accessibility settings, loading/empty/error states built** |
+| **Front end — Cases screen** | **built** — React foundation, design tokens, live Cases list, case CRUD, persisted officer/accessibility settings, loading/empty/error states |
+| **Front end — case workspace** | **built, exercised in a browser against `demo-114` (2026-09-05)** — all six §3.5a sections; **19 of §5.6's 22 endpoints are reached** from the UI |
 | `docs/demo-script.md` | **NOT WRITTEN** — workstream F |
 
 **Verified against the demo case**, `python -m pytest tests -q` → **25 passed**:
@@ -762,11 +775,25 @@ Demo case, for scale: **125 nodes (116 entities + 9 documents), 1,148 links, 9 d
 - **The cue NER reads two intelligence frames, not every one.** "The source names X" and "X is reported to be …" are handled; a name followed by a subordinate clause before its verb is not, and that is spaCy's job (`ner_backend()` says which layers are live). Widening the regex to leap a clause is exactly the bug D15 records.
 - **Scans still are not read** — unchanged, and still §13's question.
 
+- **A live upload is filed under the server's temp filename. Found 2026-09-05 by driving the real upload through the UI; backend fix, not a front-end one.** `POST /documents` writes the upload to a `tempfile.NamedTemporaryFile` and hands that path to `ingest_file`, which takes its filename from `path.name` (`backend/ingest/pipeline.py:118`). So an officer who uploads `fir_114_003.pdf` gets a document called `tmpegm_u9dr.pdf` and a doc id of `doc:tmpegm_u9dr` — in the document list, in every citation, and in the custody chain. **The demo case does not show this**, because the generator ingests real paths; it only appears on a live upload, which is exactly what a judge asks to see. The fix is to carry `file.filename` through: `ingest_file` needs a `filename: str | None = None` parameter used in place of `path.name` for `make_doc_id` and `register_document`, and `main.py` should pass `file.filename`. Left for whoever owns `backend/` — the front end already sends the real name in the multipart part.
+
+- **`/brief` omits the `verified` block on a case with no documents**, though §5.6 describes it as always present. Harmless now: the front end treats a missing block as "no verification ran" rather than "verification failed", which is the honest reading of an empty case. Worth knowing before anything else consumes `/brief`.
+
+- **The offline `/ask` fallback answers names, not questions.** With no key, `Harbhajan Dhillon` returns a real cited answer, but *"How is Ravi connected to the Ludhiana account?"* returns *"Nothing in this case matches that name or identifier."* — including for demo query 1 (§9.2), phrased as a question. §7 says `/ask` "falls back to a deterministic graph answer", and for `/brief` that is true; for `/ask` it is a bare entity lookup. **If the demo runs without the key for any reason, the centrepiece question returns nothing.** The front end renders whatever comes back honestly, so this is a backend decision: either the fallback learns to route a question at `path_between` / `top_influencers`, or the demo commits to running with the key and §13's offline risk is answered.
+
 **Next, in order:**
 
-1. **Jashan builds the live case workspace against §5.6.** The Cases screen is complete. Next is the 60/40 `shikonye` + Connections split with real `/brief`, `/ask`, `/graph`, source and node-detail behavior.
-2. **`docs/demo-script.md`** (workstream F), once the front end can show something. **This is the next backend job** — it is now the only unbuilt thing on the backend side.
-3. **The live API call, last** — see above.
+1. **`docs/demo-script.md`** (workstream F). The front end can now show everything the script needs to point at, so nothing blocks this. **It is the only unbuilt item left in the whole repo.**
+2. **The live API call**, once — together, before the 8th. See above. Every screen that consumes it already handles both outcomes, including the model being unreachable.
+3. **The upload filename defect below**, which is a backend fix and is the one thing in this list a judge would see.
+
+*(The case workspace was item 1 and is done — 2026-09-05, §10.1b and §12.)*
+
+**The three §5.6 endpoints the UI does not call, and why** — none is an oversight, and each is a small job if it turns out to be wanted:
+
+- **`POST /documents/text`** — pasting text in as a document. §3.5a's composer is text *or* an attachment, and text there is a question for `shikonye`, not evidence. Nothing in the spec asks for paste-as-evidence.
+- **`GET /timeline`** — §3.5a names six workspace sections and a timeline is not one of them. Adding a seventh is a design decision and therefore Jashan's.
+- **`POST /analytics/recompute`** — every write path already recomputes server-side and the client invalidates its queries after an upload, so a manual button would only ever confirm what already happened.
 
 *(PDF ingest and the three missing §1.1 sources were items 2 and 3 and are both done — 2026-09-05, §12. Every source the problem statement names now has a handler and a file in the demo case: §1.2a.)*
 
@@ -808,6 +835,18 @@ Append one line per session. What you built · what you changed in this file · 
   - **Demo generator**: `criminal_history.csv`, `social_media_intel.csv` and `intelligence_input_ldh.txt`, with the plants recorded in `GROUND_TRUTH.json`. **Nothing added crosses the Ludhiana/Delhi divide** — a co-accused or social edge between the clusters would be a second bridge and the kingpin's betweenness is earned by being the only one. `test_no_new_source_re_wires_the_two_clusters` enforces it so the next person to add a row finds out here rather than on stage.
   - **Jashan: `event` nodes and `MENTIONED_IN` edges now appear in `/graph`**, and there are two new finding kinds. §5.6 is unchanged — see the note at the end of §11.
   - **14 → 25 tests, all passing.** Backend is now feature-complete against §1.1; `docs/demo-script.md` is the only unbuilt backend item left.
+
+- **2026-09-05, evening (Kanwar + Claude)** — **the case workspace, built and driven in a browser against the real API.** The front end is now complete against §3.5a; `docs/demo-script.md` is the last unbuilt thing in the repo. What the next agent needs to know:
+  - **Ownership moved for this one workstream — new §10.1b.** §10.1a said the backend builds no UI, and this session was Kanwar explicitly overriding that three days out, because the workspace was the only thing standing between the backend and a demo. **§3.5a was followed, not replaced**; every design decision in it is still Jashan's, and if he wants the workspace to look different his judgement wins.
+  - **All six sections are live**: `shikonye` (opening brief, conversation with date separators, attachments with per-file progress and Change Type, Copy / View Evidence / Show Path, confidence never invented as a percentage), Documents (upload, D18 warnings, per-document grading), Connections (Cytoscape, community-grouped layout, type tints, three node sizes, dashed inferred links, Search / Filter / Fit / Reset / Legend, node drawer, relationship popover, positions and filters remembered per case), Findings (Investigate posts a real §5.3 answer into the conversation), Memory, Custody.
+  - **`highlight_path` renders two different shapes, and the difference is deliberate.** An answer's ordered path lights hop by hop in Evidence Amber with the edge between each pair. A finding's `node_ids` is an unordered set with no hops, so the links *inside* the set are lit instead and the banner says "entities", not "path". Nothing is ever drawn between two nodes that have no edge.
+  - **A path through a document node turns document nodes back on** — `/graph` drops them by default — as an override held only while the path is shown, and the banner says so. The officer's own filter comes back when the path is cleared.
+  - **Three bugs worth not reintroducing.** Cytoscape injects `__________cytoscape_container { position: relative }` at runtime, which beat Tailwind's `absolute` and collapsed the canvas to zero height — the container is sized inline now, and a `ResizeObserver` calls `cy.resize()` because the panel also changes size on every divider drag and focus toggle. `AnswerCard` read `verified.ok` through a block `/brief` omits on an empty case and white-screened the whole workspace — hence `PanelBoundary`, so one panel failing can never take the case, the graph and the navigation with it. And `/nodes/{id}` returns one entry per citation, so one CDR naming a man 34 times listed the same file 34 times; the drawer groups by document now.
+  - **Three defects found and left for the backend, all recorded in §11.** A live upload is filed under the server's temp filename (`tmpXXXX.pdf`) and it reaches the document list, every citation and the custody chain — invisible in the demo case, visible the moment a judge asks to upload something. `/brief` omits `verified` on an empty case. And the offline `/ask` fallback answers names but not questions, which means demo query 1 returns nothing without the key.
+  - **`/path` is wired to a real control.** The entity drawer traces a route between two entities in two clicks — open one, "Trace a route from this entity", open the second — which is demo query 1 asked directly on the graph. **19 of §5.6's 22 endpoints are reached from the UI**; §11 names the three that are not and why.
+  - **The entity drawer is a docked column on desktop, not an overlay.** Connections is only 40% of the workspace, so a 360px drawer over it left a sliver of graph; the drawer is now a third column and the split is computed over what remains after it. On tablet it stays an overlay, because there is only one column there.
+  - **Verified in a real browser, not by reading the code**: the demo case end to end at 1440×900 and 820×1024, zero console errors, the scanned-PDF warning shown to the officer on a real upload, a citation opening on the exact CDR row it came from, and an empty case rendering rather than crashing. `pnpm build` and `pnpm lint` are clean and the backend's 25 tests still pass.
+  - `.gitignore` gained `.gstack/` — a scratch directory the browser tooling writes into the repo root. Not project state; ignored so it cannot be committed by accident.
 
 ---
 

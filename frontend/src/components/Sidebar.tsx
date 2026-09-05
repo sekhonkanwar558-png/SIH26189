@@ -4,6 +4,14 @@ import type { AccessibilityPreferences, OfficerProfile } from '../config'
 import { BrandMark } from './BrandMark'
 import { SettingsDrawer } from './SettingsDrawer'
 
+export interface SidebarNavItem {
+  key: string
+  label: string
+  icon: React.ReactNode
+  active?: boolean
+  onSelect?: () => void
+}
+
 interface SidebarProps {
   collapsed: boolean
   mobileOpen: boolean
@@ -15,6 +23,10 @@ interface SidebarProps {
     officer: OfficerProfile,
     preferences: AccessibilityPreferences,
   ) => void
+  /** Defaults to the case list. Inside a case this is the case's own sections. */
+  items?: SidebarNavItem[]
+  /** Sits above the nav — a Back to Cases link when inside a case. */
+  aboveNav?: React.ReactNode
 }
 
 export function Sidebar({
@@ -25,6 +37,8 @@ export function Sidebar({
   onCollapseChange,
   onMobileClose,
   onSettingsSave,
+  items,
+  aboveNav,
 }: SidebarProps) {
   const nameParts = officer.name.trim().split(/\s+/)
   const firstLetters = nameParts[0]?.replace(/[^a-z]/gi, '') ?? ''
@@ -64,10 +78,27 @@ export function Sidebar({
           </div>
         </div>
 
-        <nav className="flex-1 px-3 py-5" aria-label="Main navigation">
-          <SidebarItem collapsed={collapsed} label="Cases" active>
-            <BriefcaseBusiness size={19} strokeWidth={1.8} />
-          </SidebarItem>
+        <nav className="flex-1 overflow-y-auto px-3 py-5" aria-label="Main navigation">
+          {aboveNav && !collapsed && <div className="mb-3">{aboveNav}</div>}
+          {items ? (
+            <div className="space-y-1">
+              {items.map((item) => (
+                <SidebarItem
+                  key={item.key}
+                  collapsed={collapsed}
+                  label={item.label}
+                  active={item.active}
+                  onSelect={item.onSelect}
+                >
+                  {item.icon}
+                </SidebarItem>
+              ))}
+            </div>
+          ) : (
+            <SidebarItem collapsed={collapsed} label="Cases" active>
+              <BriefcaseBusiness size={19} strokeWidth={1.8} />
+            </SidebarItem>
+          )}
         </nav>
 
         <div className="border-t border-line p-3">
@@ -123,13 +154,15 @@ interface SidebarItemProps {
   collapsed: boolean
   label: string
   active?: boolean
+  onSelect?: () => void
   children: React.ReactNode
 }
 
-function SidebarItem({ collapsed, label, active = false, children }: SidebarItemProps) {
+function SidebarItem({ collapsed, label, active = false, onSelect, children }: SidebarItemProps) {
   const item = (
     <button
       type="button"
+      onClick={onSelect}
       className={`flex h-11 w-full items-center rounded-lg text-sm font-semibold transition-colors ${collapsed ? 'justify-center' : 'gap-3 px-3'} ${active ? 'bg-civic-soft text-civic' : 'text-muted hover:bg-canvas hover:text-ink'}`}
       aria-current={active ? 'page' : undefined}
       aria-label={label}

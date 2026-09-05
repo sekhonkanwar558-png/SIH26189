@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { CasesPage } from './pages/CasesPage'
-import { WorkspacePreview } from './pages/WorkspacePreview'
+import { Workspace } from './pages/Workspace'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -19,7 +19,7 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<CasesPage />} />
-          <Route path="/cases/:caseId" element={<WorkspacePreview />} />
+          <Route path="/cases/:caseId" element={<Workspace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
