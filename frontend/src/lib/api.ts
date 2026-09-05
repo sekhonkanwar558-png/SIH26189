@@ -1,19 +1,17 @@
 import type {
-  Analytics,
+  AgentAnswer,
   CaseBrief,
   CaseDetail,
   CaseDocument,
   CaseGraph,
   CaseSummary,
+  ConversationTurn,
   CustodyLog,
   HealthReport,
-  MemoryEntry,
   NewCaseInput,
   NodeProfile,
-  PathResult,
   SourceExcerpt,
   UploadResponse,
-  AgentAnswer,
 } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
@@ -27,6 +25,11 @@ export class ApiError extends Error {
     this.status = status
   }
 }
+
+/** 503 means the assistant itself is down — not the case service. The two read
+ *  very differently to an officer and must not be shown the same way. */
+export const isAssistantDown = (error: unknown) =>
+  error instanceof ApiError && error.status === 503
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // The browser sets multipart's own Content-Type, boundary included. Forcing
@@ -55,78 +58,67 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T
 }
 
-export function getCases(officer: string) {
-  return request<CaseSummary[]>(`/api/cases?officer=${encodeURIComponent(officer)}`)
-}
-
-export function createCase(input: NewCaseInput) {
-  return request<CaseSummary>('/api/cases', {
-    method: 'POST',
-    body: JSON.stringify(input),
-  })
-}
-
-export function updateCase(
-  caseId: string,
-  updates: Partial<Pick<CaseSummary, 'title' | 'case_type' | 'brief' | 'status'>>,
-) {
-  return request<CaseSummary>(`/api/cases/${encodeURIComponent(caseId)}`, {
-    method: 'PATCH',
-    body: JSON.stringify(updates),
-  })
-}
-
-export function deleteCase(caseId: string) {
-  return request<void>(
-    `/api/cases/${encodeURIComponent(caseId)}?confirm=${encodeURIComponent(caseId)}`,
-    { method: 'DELETE' },
-  )
-}
-
-// ----------------------------------------------------------- case workspace
-// One function per §5.6 endpoint. Nothing here reshapes a response: the screens
-// consume the contract directly, so a drift between the two shows up as a type
-// error rather than as a quietly wrong panel.
-
 const caseUrl = (caseId: string, suffix = '') =>
   `/api/cases/${encodeURIComponent(caseId)}${suffix}`
 
-export function getHealth() {
-  return request<HealthReport>('/api/health')
-}
+export const getHealth = () => request<HealthReport>('/api/health')
 
-export function getCase(caseId: string) {
-  return request<CaseDetail>(caseUrl(caseId))
-}
+export const getCases = (officer: string) =>
+  request<CaseSummary[]>(`/api/cases?officer=${encodeURIComponent(officer)}`)
 
-export function getGraph(caseId: string, includeDocuments = false) {
-  return request<CaseGraph>(
-    caseUrl(caseId, `/graph?include_documents=${includeDocuments}`),
+export const getCase = (caseId: string) => request<CaseDetail>(caseUrl(caseId))
+
+export const createCase = (input: NewCaseInput) =>
+  request<CaseSummary>('/api/cases', { method: 'POST', body: JSON.stringify(input) })
+
+export const renameCase = (caseId: string, title: string) =>
+  request<CaseSummary>(caseUrl(caseId), {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  })
+
+export const deleteCase = (caseId: string) =>
+  request<{ deleted: string }>(
+    caseUrl(caseId, `?confirm=${encodeURIComponent(caseId)}`),
+    { method: 'DELETE' },
   )
-}
 
-export function getNode(caseId: string, nodeId: string) {
-  // The node id carries its own colon and the route is a :path, so the prefix
-  // must survive encoding — encodeURIComponent would turn `person:x` into
-  // `person%3Ax` and the lookup would miss.
-  return request<NodeProfile>(
-    caseUrl(caseId, `/nodes/${nodeId.split('/').map(encodeURIComponent).join('/')}`),
+// ------------------------------------------------------------- conversation
+
+/** The thread lives on the case, so it is fetched, not remembered by this tab.
+ *  Reload, another machine, a colleague — same conversation. */
+export const getConversation = (caseId: string) =>
+  request<{ turns: ConversationTurn[] }>(caseUrl(caseId, '/conversation'))
+
+export const clearConversation = (caseId: string) =>
+  request<{ cleared: number }>(
+    caseUrl(caseId, `/conversation?confirm=${encodeURIComponent(caseId)}`),
+    { method: 'DELETE' },
   )
-}
 
-export function getPath(caseId: string, a: string, b: string, maxHops = 6) {
-  const query = new URLSearchParams({ a, b, max_hops: String(maxHops) })
-  return request<PathResult[]>(caseUrl(caseId, `/path?${query}`))
-}
+export const askCase = (caseId: string, question: string, actor: string) =>
+  request<AgentAnswer>(caseUrl(caseId, '/ask'), {
+    method: 'POST',
+    body: JSON.stringify({ question, actor }),
+  })
 
-export function getAnalytics(caseId: string, metric = 'betweenness', limit = 10) {
-  const query = new URLSearchParams({ metric, limit: String(limit) })
-  return request<Analytics>(caseUrl(caseId, `/analytics?${query}`))
-}
+export const getBrief = (caseId: string) => request<CaseBrief>(caseUrl(caseId, '/brief'))
 
-export function getDocuments(caseId: string) {
-  return request<CaseDocument[]>(caseUrl(caseId, '/documents'))
-}
+// -------------------------------------------------------------- the evidence
+
+export const getGraph = (caseId: string, includeDocuments = false) =>
+  request<CaseGraph>(
+    caseUrl(caseId, `/graph?include_documents=${includeDocuments ? 'true' : 'false'}`),
+  )
+
+export const getNode = (caseId: string, nodeId: string) =>
+  request<NodeProfile>(caseUrl(caseId, `/nodes/${encodeURIComponent(nodeId)}`))
+
+export const getDocuments = (caseId: string) =>
+  request<CaseDocument[]>(caseUrl(caseId, '/documents'))
+
+export const getCustody = (caseId: string, limit?: number) =>
+  request<CustodyLog>(caseUrl(caseId, limit ? `/custody?limit=${limit}` : '/custody'))
 
 export function getSource(caseId: string, docId: string, start?: number, end?: number) {
   const query = new URLSearchParams({ doc_id: docId })
@@ -135,88 +127,41 @@ export function getSource(caseId: string, docId: string, start?: number, end?: n
   return request<SourceExcerpt>(caseUrl(caseId, `/source?${query}`))
 }
 
-export function getBrief(caseId: string) {
-  return request<CaseBrief>(caseUrl(caseId, '/brief'))
-}
-
-export function askCase(caseId: string, question: string, actor: string) {
-  return request<AgentAnswer>(caseUrl(caseId, '/ask'), {
-    method: 'POST',
-    body: JSON.stringify({ question, actor }),
-  })
-}
-
-export function investigateFinding(caseId: string, findingId: string) {
-  return request<AgentAnswer>(
-    caseUrl(caseId, `/findings/${encodeURIComponent(findingId)}/investigate`),
-    { method: 'POST' },
-  )
-}
-
-export function getMemory(caseId: string, kind?: string, status?: string) {
-  const query = new URLSearchParams()
-  if (kind) query.set('kind', kind)
-  if (status) query.set('status', status)
-  const suffix = query.toString() ? `/memory?${query}` : '/memory'
-  return request<MemoryEntry[]>(caseUrl(caseId, suffix))
-}
-
-export function closeMemory(caseId: string, memId: string, status = 'resolved') {
-  return request<MemoryEntry>(
-    caseUrl(caseId, `/memory/${encodeURIComponent(memId)}/close?status=${status}`),
-    { method: 'POST' },
-  )
-}
-
-export function getCustody(caseId: string, limit?: number) {
-  const suffix = limit ? `/custody?limit=${limit}` : '/custody'
-  return request<CustodyLog>(caseUrl(caseId, suffix))
-}
-
+/** Upload reports progress, because a scanned FIR is a slow thing to hand over
+ *  and silence during it reads as a broken button. */
 export function uploadDocument(
   caseId: string,
   file: File,
-  kind: string | undefined,
-  actor: string,
   onProgress?: (percent: number) => void,
-) {
-  const query = new URLSearchParams({ actor })
-  if (kind) query.set('kind', kind)
-  const url = `${API_BASE}${caseUrl(caseId, `/documents?${query}`)}`
-
-  // XHR rather than fetch: an officer uploading a 40-page scan needs to see it
-  // moving, and fetch still cannot report upload progress.
-  return new Promise<UploadResponse>((resolve, reject) => {
+): Promise<UploadResponse> {
+  return new Promise((resolve, reject) => {
     const form = new FormData()
     form.append('file', file)
 
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', url)
+    xhr.open('POST', `${API_BASE}${caseUrl(caseId, '/documents')}`)
     xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) {
-        onProgress?.(Math.round((event.loaded / event.total) * 100))
+      if (event.lengthComputable && onProgress) {
+        onProgress(Math.round((event.loaded / event.total) * 100))
       }
     }
     xhr.onload = () => {
       let body: unknown = null
       try {
-        body = JSON.parse(xhr.responseText) as unknown
+        body = JSON.parse(xhr.responseText)
       } catch {
-        // A non-JSON body is handled by the status check below.
+        body = null
       }
       if (xhr.status >= 200 && xhr.status < 300) {
-        onProgress?.(100)
         resolve(body as UploadResponse)
         return
       }
       const detail =
         (body as { detail?: string } | null)?.detail ||
-        'This document could not be added to the case.'
+        'That file could not be added to the case.'
       reject(new ApiError(detail, xhr.status))
     }
-    xhr.onerror = () =>
-      reject(new ApiError('The case service could not be reached.', 0))
+    xhr.onerror = () => reject(new ApiError('The case service could not be reached.', 0))
     xhr.send(form)
   })
 }
-

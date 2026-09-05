@@ -90,7 +90,7 @@ lose the room if you start reading a stack trace.
 
 Ask, in the `shikonye` composer:
 
-> **How is Ravi Kumar connected to account 50100244178?**
+> **How is Ravi connected to the Ludhiana account?**
 
 While the answer lands, say nothing. Let them watch the path light up hop by hop
 on the right. Then:
@@ -105,15 +105,10 @@ on the right. Then:
    > is checked against the graph before you see it, and anything that does not
    > exist is stripped and reported. That is why this is not a chatbot."
 
-**The phrasing of the question matters and you should know why.** Ask it with the
-account *named*. "The Ludhiana account" is how a person speaks; the graph holds
-`account:50100244178`. With the model running, it will resolve that for you.
-Offline it will tell you it could not, and name the candidates — which is honest,
-and is also thirty seconds you do not have on stage.
-
-**Alternative route if the composer misbehaves:** open Ravi Kumar's node on the
-graph, click **Trace a route from this entity**, then click the account. Same
-path, same lighting, no model involved at all. Know this by muscle memory.
+**Ask it the way a person speaks — that is the point.** "The Ludhiana account"
+is not what the graph holds; the graph holds `account:50100244178`, and resolving
+one to the other is the assistant's job (D26). **Never type an id on stage.** If
+you do, you have shown them a database with a text box on it.
 
 ---
 
@@ -226,36 +221,26 @@ rather than making the argument.
 
 ---
 
-## The offline run — read this if there is no key or no network
+## The interface, and why there is so little of it
 
-**Everything except the model's narration works with no API key and no network**
-(D11). The graph, the analytics, the findings, the citations, the custody chain
-and the path tracing are all computed locally and never touch the API.
+**One chat. That is the whole product** (D25). If a judge asks where the rest of
+it is, that question is the pitch:
 
-`shikonye` shows an **Offline analysis** badge. **Say so out loud, once**, early:
+> "An investigating officer is not going to learn six screens. He hands it a
+> document and he asks it things, the way he would ask a colleague who had
+> already read the file. Everything you would expect to be a tab — the documents,
+> the findings, the chain of custody, an entity's history — he gets by asking for
+> it, which is one skill instead of six."
 
-> "We are running this fully offline — no network, no API. Everything you are
-> about to see is computed on this machine."
+**There are no commands and nothing to type but English** (D26). Do not type an
+entity id on stage, ever. Say "the Ludhiana account" — resolving that is the
+assistant's job, and doing it in front of them is the demonstration.
 
-That is a *strength* in a room full of law-enforcement evaluators, so claim it
-rather than apologising for it.
-
-What changes:
-
-| Section | Offline |
-|---|---|
-| §2 upload | **Identical.** No model in the ingest path (D4). |
-| §3 query 1 | **Works, with the account named.** The router traces the real path and lights it. Say "how is Ravi Kumar connected to account 50100244178" — not "the Ludhiana account", which offline returns a list of candidates instead. |
-| §4 query 2 | **Identical answer** — it leads with the `hidden_broker` finding, which is computed from the graph, not written by the model. |
-| §5 custody | **Identical.** |
-| §6 isolation | **Identical.** |
-| Wording | Answers are shorter and flatter. They cite the same ids. |
-
-**Do not attempt an unrehearsed question offline.** The router answers what it can
-resolve and says plainly when it cannot — which is correct behaviour and a bad
-look if it happens for the first time on stage. Stick to the script.
-
----
+**If the assistant cannot be reached, it says so and nothing else pretends.**
+There is no degraded mode (D22): the graph, the documents and the custody chain
+are all still there and still true, and shikonye tells him plainly that it is
+unavailable rather than answering anyway. **So the round needs the key and a
+network.** Check both before you start — §0.
 
 ## If something breaks
 

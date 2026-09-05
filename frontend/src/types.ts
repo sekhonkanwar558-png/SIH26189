@@ -131,20 +131,38 @@ export interface AgentAnswer {
   cited_nodes: string[]
   cited_edges: string[]
   highlight_path: string[]
+  /**
+   * What kind of thing was just said. `evidence` asserts something about this
+   * case and must rest on it, so an uncited one fails verification. `guidance`
+   * is advice, a plan, a clarifying question — it asserts no case fact, so it
+   * has nothing to cite and is not a failure. Absent means treat as evidence.
+   */
+  claim_type?: 'evidence' | 'guidance'
   confidence: 'high' | 'medium' | 'low'
   caveats: string[]
   /**
-   * Optional on purpose. §5.6 describes this block as always present, and for
-   * `/ask` it is — but `/brief` on a case with no documents returns a narrative
-   * without it, because there were no citations to check. Absent means "not
-   * verified", which is not the same as "failed verification", and the two are
-   * rendered differently.
+   * Always present on /ask and /brief. Absent only on an answer stored before
+   * that was true, so a missing block means "no verification ran" — which is
+   * not the same as failing one, and the two are rendered differently.
    */
   verified?: {
     ok: boolean
     dropped_nodes: string[]
     dropped_edges: string[]
   }
+}
+
+/** One turn of the case's own conversation. Stored on the case (D27), so this
+ *  is fetched rather than remembered by the browser. */
+export interface ConversationTurn {
+  seq: number
+  role: 'officer' | 'shikonye'
+  actor: string
+  text: string
+  answer: AgentAnswer | Record<string, never>
+  node_ids: string[]
+  ts: string
+  graph_rev: number
 }
 
 export interface Finding {
@@ -167,6 +185,9 @@ export interface CaseBrief {
   requests: MemoryEntry[]
   open_questions: MemoryEntry[]
   narrative: AgentAnswer | null
+  /** True when nothing has been found since the last briefing, so this is the
+   *  one already in the thread rather than a new one. */
+  repeat?: boolean
 }
 
 export interface MemoryEntry {

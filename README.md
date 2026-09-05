@@ -54,6 +54,73 @@ If you are unsure about an Anthropic API shape, **do not guess** — check the o
 
 ---
 
+## 0.5 THE PIVOT — 2026-09-05, and it supersedes several sections below
+
+**Read this before §3, §10 or the decision table.** Kanwar changed the product's
+face on the evening of 2026-09-05. The engine did not move; what an officer sees
+did, completely, and several sections written before this are now wrong where
+they disagree with it.
+
+**In his words, across one conversation:**
+
+> *"why do we need that offline analysis anywhere, dont keep that at all, just
+> keep llm calls only for every search from anything"*
+>
+> *"just keep bot peak at its best working as true real assistant at any time an
+> officer needs"*
+>
+> *"our main target isss providing a peak assistant 'shikonye' working at all
+> problems an officer talks to him, it should be like talking to some teammate
+> and feel realistic"*
+>
+> *"it shouldnt just be a sloppy 'system prompt' behinddd"*
+>
+> *"remove those different sections buttons of documents, other on side, just one
+> chat interface and option to graph… one clean chatgpt like interface, but great
+> shit at backend"*
+>
+> *"dont just push slash commands at all, the bot should only fire from chat
+> message, because we are making for non technical peopleee"*
+>
+> *"just one 'shikonye' in small letters everywhere without any logo"*
+
+### What that means, concretely
+
+1. **There is no offline mode and no fallback. Ever.** `/ask`, `/brief` and
+   `/investigate` either run the model or return **503** and say the assistant is
+   unavailable. The old graph-lookup fallback is deleted, not disabled. **D22.**
+2. **shikonye is the product.** One name, lowercase, for the assistant and the
+   application. **No CaseLens, no logo, no wordmark, nowhere.** **D24.**
+3. **One chat.** No section rail, no Documents/Findings/Memory/Custody panels. A
+   conversation, and the graph when an answer has one to show. Everything an
+   officer wants he gets by *typing a sentence*. **D25.**
+4. **No commands, no syntax, no ids typed by a human.** No slash commands, no
+   `@mentions`, and never "type the account number". The officer is not
+   technical; he says "the Ludhiana account" and the assistant resolves it with
+   its tools. **D26.**
+5. **The conversation lives on the case, server-side**, not in the browser. It is
+   what makes "and what about him?" work at all, and it means a colleague opening
+   the same case sees what was already asked. **D27.**
+6. **The depth is in the machinery, not the prompt.** Per-case thread, a referent
+   set carried between turns as ids, `claim_type` on the answer contract, act
+   tools, self-verification, custody. A longer system prompt is not a mechanism.
+
+### What this supersedes
+
+- **§3.5a (Jashan's design specification) is retired as the interface spec.** The
+  Calm Civic Forensic palette, the 60/40 split, the six named workspace sections
+  and the labelled tablet drawer describe a product that no longer exists. Kept
+  in place only as the record of what was built and why it changed.
+- **D14, D16, D17 are superseded** by D24–D26 — see the notes on those rows.
+- **§10.1a and §10.1b (who owns the front end) no longer describe reality.**
+  Kanwar took the interface, then changed it. **Jashan: nothing you built is
+  being criticised — the product moved under it.**
+- **`docs/demo-script.md`'s offline variant is deleted**, and so is its
+  instruction to type an account number, which only ever existed to work around
+  the fallback that no longer exists.
+
+---
+
 ## 1. What we are building, and what we are judged on
 
 ### 1.1 The problem statement, verbatim
@@ -345,16 +412,21 @@ What makes a case specific is `case_type` and `brief` on the case itself (`backe
 | D11 | **Findings are computed from the graph; the model narrates them** | Keeps D3 structurally true, and keeps the assistant useful with no key, no network and no budget — the state the demo machine may be in. | 09-04 |
 | D12 | **The engine is crime-type agnostic; the case carries its own type and brief** | *"it should work for any case… so it mold in every case possible."* Nothing in ingest, graph, analytics or the agent knows what trafficking is. §3.9. | 09-04 |
 | D13 | **Centrality is scored on a person-projected graph** | A kingpin whose only edge is `OWNS` to his own SIM scores near zero on the raw graph, because every path stops at the phone. "Who matters" is a question about people; a man and his SIM are not two actors. `nx_adapter.project_people`. | 09-04 |
-| D14 | **The backend builds no UI and makes no design decisions** | Author's call: every visual decision is Jashan's. A "temporary" interface built to test an endpoint anchors decisions that are not the backend's to anchor. §10.1a. | 09-04 |
+| D14 | ~~**The backend builds no UI and makes no design decisions**~~ **SUPERSEDED 09-05 (§0.5)** | Author's call: every visual decision is Jashan's. A "temporary" interface built to test an endpoint anchors decisions that are not the backend's to anchor. §10.1a. | 09-04 |
 | D15 | **Proximity linking is for prose only, and claims the nearest name only** | Both learned by measurement, not opinion. Running co-occurrence over a CDR export links whoever sits in adjacent rows and added 606 meaningless edges, burying the real structure. And linking every person within the window to a nearby number gave Ravi ownership of Manjit's phone, which then produced a real-looking false path. | 09-04 |
 | D16 | **Frontend stack: React + Vite + TypeScript, Tailwind CSS, Radix Primitives, Lucide, Cytoscape.js, TanStack Query and declarative React Router** | Jashan's call after choosing the full interaction system. It keeps the UI local-first, typed and compatible with the frozen HTTP API. | 09-05 |
-| D17 | **Calm Civic Forensic visual language; light mode only** | Officers need an interface that reads like dependable casework, not a technical or "hacker" console. Exact tokens and behavior are in §3.5a. | 09-05 |
+| D17 | ~~**Calm Civic Forensic visual language; light mode only**~~ **SUPERSEDED by D25/D28 (§0.5)** | Officers need an interface that reads like dependable casework, not a technical or "hacker" console. Exact tokens and behavior are in §3.5a. | 09-05 |
 | D18 | **A document we could not read must say so; it must never ingest in silence** | A scan has no text layer, so every step after the reader succeeds on an empty string — the document registers, custody records it as evidence received, and no entity ever appears, with nothing saying why. That is worse than an error, because it is indistinguishable from a document that had nothing in it. `read_document` counts blank pages and returns a `warnings` list; `POST /documents` passes it through and **the front end must display it**. Adding OCR is a *separate* decision and is not taken here (§13). | 09-05 |
 | D19 | **The two sources added last introduced no new node or edge type** | §5.1 is frozen and the front end is being built against it three days out. A social handle is an `account` namespaced by platform, a prior case is an `event`, and what kind of link a `CO_OCCURS` is gets said in `attrs.basis` — where `text_proximity`, `cdr_handset` and `co_accused` all already live. A `FOLLOWS` and a `CHARGED_IN` edge would each read better and would each cost a contract change, a message to four people and a front-end update. **If you are about to add one, this is why it is not there.** | 09-05 |
 | D20 | **An intelligence report is graded, and what it implies is discounted** | §1.1 names intelligence agency reports as a source, and until now one was read as an ordinary note — an uncorroborated tip from an untested source entered the graph at exactly the confidence a bank record does. Intelligence carries the Admiralty grading (reliability A–F, credibility 1–6) for precisely this reason, and it maps onto §5.1's `confidence` almost exactly. The factor is the **lower** of the two axes, not their product: they are independent judgements in the standard and multiplying them invents a precision we do not have. An ungraded intelligence report still gets 0.7 — no grading is not the same as a good one. | 09-05 |
 | D21 | **`_hidden_brokers` ranks people against people** | Its bar was the fifth-highest betweenness across *every* node, and then only people were ever candidates. On the demo case three of the top five are a document, a bank statement and a travel agency — so "top five" quietly meant "top two people", and **the more documents an officer uploaded the fewer brokers the case could surface.** Adding the criminal-history source pushed the kingpin to sixth overall and deleted demo query 2 outright. The graph was right; the yardstick was wrong. Guarded by `test_the_broker_threshold_ranks_people_against_people`. | 09-05 |
 | D22 | **With no model, `/ask` routes the question over the graph — it does not fall back to a name lookup** | The old fallback handed the officer's whole sentence to `find_entity`, which is a substring match on labels, so anything phrased as a *question* matched nothing: §9.2 query 1 returned *"Nothing in this case matches that name or identifier."* The centrepiece of the pitch died with the network. `agent/offline.py` routes instead — two entities named gives the path between them, an influence question gives the finding, a type word gives what the case holds of that kind — and where it cannot resolve a phrase it **names the candidates rather than picking one**, because a router that guesses confidently is the failure D18 and D21 are both about. It cannot invent a node that is not there: "the Ludhiana account" is how a person speaks and `account:50100244178` is what the graph holds, which is why the offline run sheet names the account. | 09-05 |
 | D23 | **A finding's `node_ids` is never returned as an answer's `highlight_path`** | The UI walks `highlight_path` hop by hop as an ordered route. A finding's `node_ids` is an unordered *set* — `[harbhajan, cdr_doc, ldh_031, jaswant, balraj, device]` is not a journey anyone can take — so returning the set as a path draws a route that does not exist, which is D3 inverted. A finding answer lights its subject only; the rest of the set is still cited and Evidence shows it. | 09-05 |
+| D24 | **One name: `shikonye`, lowercase, for the assistant and the product. No logo.** | Kanwar's call, 09-05: *"just one 'shikonye' in small letters everywhere without any logo or shitt."* CaseLens was a second thing to learn for no gain — an officer does not need a brand between him and the case. The assistant has a name because you talk to it; the application does not need one on top. | 09-05 |
+| D25 | **One chat interface. No section rail, no panels.** | *"just one chat interface and option to graph… one clean chatgpt like interface, but great shit at backend."* Six navigable sections is a filing cabinet, and an officer under time pressure does not explore a filing cabinet. Everything the panels showed — documents, findings, memory, the custody chain, an entity's profile — is reachable by asking for it, which is one skill instead of six. The graph appears when an answer has a route to show. | 09-05 |
+| D26 | **Nothing is invoked by syntax. No slash commands, no ids typed by a human.** | *"the bot should only fire from chat message, because we are making for non technical peopleee."* A command language is a second product the officer has to learn, and the moment one exists the interface has two classes of user. He says "the Ludhiana account" and the assistant resolves it — resolving it is the assistant's job and it has `find_entity` to do it with. | 09-05 |
+| D27 | **The conversation is stored on the case, not in the browser** | A teammate remembers the line above. `ask` used to send `messages=[{one prompt}]`, so the officer was reading a thread and talking to something with no memory of it — "and what about him?" could not work because there was no him. The thread is a table on the case: it survives a reload, reaches a colleague opening the same case, and is what makes multi-turn possible at all. The referent set (the ids the last answer rested on) is carried forward **as ids**, because asking a model to remember harder is not a mechanism. | 09-05 |
+| D28 | **Near-colourless interface; Evidence Amber is the only saturated colour and it means one thing** | An officer reads text here for an hour. Every accent not carrying meaning competes with the words. One ink, two greys, hairline borders — and amber exclusively for *this is the path the answer rests on*, so the one colour in the product is also the one claim that matters. | 09-05 |
 
 ---
 

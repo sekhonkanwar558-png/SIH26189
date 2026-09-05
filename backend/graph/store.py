@@ -95,6 +95,24 @@ CREATE TABLE IF NOT EXISTS agent_memory (
 );
 CREATE INDEX IF NOT EXISTS ix_mem_kind   ON agent_memory(kind);
 CREATE INDEX IF NOT EXISTS ix_mem_status ON agent_memory(status);
+
+-- The officer's conversation with the assistant, stored on the CASE and not in
+-- his browser. This is what makes it a teammate rather than a search box: a
+-- teammate remembers what you said ten minutes ago, remembers it tomorrow, and
+-- remembers it when your colleague opens the same case on another machine. It
+-- also means `ask` can send the model a real multi-turn conversation instead of
+-- one cold question, which is what makes "and what about him?" work at all.
+CREATE TABLE IF NOT EXISTS conversation (
+    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+    role       TEXT NOT NULL,          -- 'officer' | 'shikonye'
+    actor      TEXT NOT NULL DEFAULT 'officer',
+    text       TEXT NOT NULL,
+    answer     TEXT NOT NULL DEFAULT '{}',   -- the full §5.3 answer, for replay
+    node_ids   TEXT NOT NULL DEFAULT '[]',   -- what this turn was about
+    ts         TEXT NOT NULL,
+    graph_rev  INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_conv_ts ON conversation(ts);
 """
 
 
@@ -406,6 +424,47 @@ class CaseStore:
         )
         self.conn.commit()
         return self.memory_entry(mem_id)
+
+    # ------------------------------------------------------------ conversation
+
+    def say(self, *, role: str, text: str, answer: dict | None = None,
+            node_ids: Sequence[str] = (), actor: str = "officer") -> dict:
+        """Append one turn. Roles are 'officer' and 'shikonye'."""
+        if role not in ("officer", "shikonye"):
+            raise ValueError(f"unknown role {role!r}")
+        cur = self.conn.execute(
+            "INSERT INTO conversation(role,actor,text,answer,node_ids,ts,graph_rev) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (role, actor, text, _j(answer or {}), _j(list(node_ids)), now_iso(),
+             self.graph_rev()),
+        )
+        self.conn.commit()
+        return self.turn(cur.lastrowid)
+
+    def turn(self, seq: int) -> dict | None:
+        r = self.conn.execute("SELECT * FROM conversation WHERE seq=?", (seq,)).fetchone()
+        return self._turn(r) if r else None
+
+    def conversation(self, limit: int = 100) -> list[dict]:
+        """Oldest first — this is read as a transcript and sent to the model in
+        that order, so the natural order is the useful one."""
+        rows = self.conn.execute(
+            "SELECT * FROM conversation ORDER BY seq DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [self._turn(r) for r in reversed(rows)]
+
+    def clear_conversation(self) -> int:
+        n = self.conn.execute("SELECT count(*) c FROM conversation").fetchone()["c"]
+        self.conn.execute("DELETE FROM conversation")
+        self.conn.commit()
+        return n
+
+    @staticmethod
+    def _turn(row: sqlite3.Row) -> dict:
+        d = dict(row)
+        d["answer"] = json.loads(d["answer"])
+        d["node_ids"] = json.loads(d["node_ids"])
+        return d
 
     def memory_entry(self, mem_id: str) -> dict | None:
         r = self.conn.execute("SELECT * FROM agent_memory WHERE id=?", (mem_id,)).fetchone()

@@ -37,6 +37,7 @@ from backend.custody.chain import CustodyChain
 from backend.graph.nx_adapter import case_graphs
 from backend.graph.store import CaseStore
 from backend.ingest.ner import ner_backend
+from backend.agent.loop import AgentUnavailable
 from backend.ingest.pipeline import ingest_file, ingest_text
 
 app = FastAPI(
@@ -317,7 +318,13 @@ def ask(case_id: str, body: Question) -> dict:
     """The officer's question, answered by this case's agent. Returns §5.3."""
     ctx = _ctx(case_id, actor=body.actor)
     with ctx.store:
-        return CaseAgent(ctx).ask(body.question, actor=body.actor)
+        try:
+            return CaseAgent(ctx).ask(body.question, actor=body.actor)
+        except AgentUnavailable as exc:
+            # 503, not a fabricated answer: the assistant is either
+            # working or honestly unavailable (D22). The UI shows this
+            # with a retry; everything else in the case still works.
+            raise HTTPException(503, f"shikonye is unavailable: {exc}") from exc
 
 
 @app.get("/api/cases/{case_id}/brief")
@@ -326,14 +333,26 @@ def brief(case_id: str) -> dict:
     believes, and what it wants next."""
     ctx = _ctx(case_id)
     with ctx.store:
-        return CaseAgent(ctx).brief()
+        try:
+            return CaseAgent(ctx).brief()
+        except AgentUnavailable as exc:
+            # 503, not a fabricated answer: the assistant is either
+            # working or honestly unavailable (D22). The UI shows this
+            # with a retry; everything else in the case still works.
+            raise HTTPException(503, f"shikonye is unavailable: {exc}") from exc
 
 
 @app.post("/api/cases/{case_id}/findings/{finding_id}/investigate")
 def investigate(case_id: str, finding_id: str) -> dict:
     ctx = _ctx(case_id)
     with ctx.store:
-        return CaseAgent(ctx).investigate(finding_id)
+        try:
+            return CaseAgent(ctx).investigate(finding_id)
+        except AgentUnavailable as exc:
+            # 503, not a fabricated answer: the assistant is either
+            # working or honestly unavailable (D22). The UI shows this
+            # with a retry; everything else in the case still works.
+            raise HTTPException(503, f"shikonye is unavailable: {exc}") from exc
 
 
 @app.get("/api/cases/{case_id}/memory")
@@ -352,6 +371,33 @@ def close_memory(case_id: str, mem_id: str, status: str = Query("resolved")) -> 
         if entry is None:
             raise HTTPException(404, f"no memory entry {mem_id!r}")
         return entry
+
+
+# ------------------------------------------------------------- conversation
+
+@app.get("/api/cases/{case_id}/conversation")
+def conversation(case_id: str, limit: int = 200) -> dict:
+    """The officer's thread with shikonye, oldest first.
+
+    It lives on the case, not in a browser: open the case on another machine, or
+    hand it to a colleague, and the conversation is there. That is also what lets
+    `ask` send the model a real exchange rather than one cold question.
+    """
+    store, _ = _open(case_id)
+    with store:
+        return {"turns": store.conversation(limit=limit)}
+
+
+@app.delete("/api/cases/{case_id}/conversation")
+def clear_conversation(case_id: str, confirm: str = Query(...)) -> dict:
+    """Start the thread again. `confirm` must be the case id — this deletes what
+    the assistant and the officer said to each other, and nothing else brings it
+    back. The custody chain still holds every question that was asked."""
+    if confirm != case_id:
+        raise HTTPException(400, "confirm must be the case id")
+    store, _ = _open(case_id)
+    with store:
+        return {"cleared": store.clear_conversation()}
 
 
 # ------------------------------------------------------------------ custody

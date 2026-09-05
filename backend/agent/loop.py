@@ -19,7 +19,15 @@ Three rules the code enforces so they cannot be prompted away:
 
 1. **Findings come from the graph, not the model.** `analytics/anomalies.py`
    computes them deterministically. The model narrates and investigates them.
-   That is D3, and it is why the assistant is still useful offline.
+   That is D3: the model can only ever describe what the graph already holds.
+
+   **There is no fallback and there must not be one** (D22). If the assistant
+   cannot run, the officer is told so and gets a retry — never a graph lookup
+   dressed up as an answer. A degraded impostor that answers some questions and
+   silently cannot answer others is worse than an outage, because he cannot tell
+   which one he is talking to. The graph, the documents, the findings, the paths
+   and the custody chain all remain fully usable without it; what stops is the
+   assistant, and it says so.
 2. **Every answer is verified before it is returned** (`contract.verify`). A
    citation that does not exist in the graph is stripped and reported.
 3. **Everything it does is written down** — conclusions and questions into case
@@ -33,7 +41,6 @@ import os
 from typing import Any, Callable
 
 from backend.agent import tools as T
-from backend.agent import offline as offline_mod
 from backend.agent.contract import (ANSWER_SCHEMA, empty_answer, parse, verify,
                                     verified_vacuously)
 from backend.agent.tools import CaseContext
@@ -43,6 +50,18 @@ from backend.config import ANTHROPIC_MODEL
 MAX_TOOL_ITERATIONS = int(os.environ.get("SIH_MAX_TOOL_ITERATIONS", "14"))
 EFFORT = os.environ.get("SIH_EFFORT", "high")
 MAX_TOKENS = 16000
+# How much of the thread the model sees. Long enough that a real working
+# session holds together; bounded so a case worked for months does not send
+# a year of conversation on every question.
+CONVERSATION_TURNS = int(os.environ.get("SIH_CONVERSATION_TURNS", "24"))
+# How many findings one briefing covers. The same number is shown to the
+# model and marked delivered; they must not drift apart.
+BRIEF_FINDINGS = 8
+
+# One blank line between two blocks of text.
+PARA = """
+
+"""
 
 SYSTEM = """You are the case agent for a single criminal investigation, working \
 under the investigating officer who opened this case. You are not a general \
@@ -289,14 +308,26 @@ class CaseAgent:
     # ------------------------------------------------------------------- ask
 
     def ask(self, question: str, *, actor: str = "officer") -> dict:
+        """One turn of a conversation, not one query against a search box.
+
+        The thread lives on the case (`store.conversation`), so the model is
+        handed the real exchange and the officer can say "and him?" — and so his
+        colleague opening the same case tomorrow sees what was already asked and
+        answered, instead of starting the relationship again.
+        """
         self.ctx.chain.append(action="query", actor=actor, ref=f"question:{question[:120]}",
                               payload={"question": question})
-        try:
-            answer = self._run(self._question_prompt(question))
-        except AgentUnavailable as exc:
-            answer = self._offline_answer(question, str(exc))
+        self.ctx.store.say(role="officer", text=question, actor=actor)
 
-        answer = verify(answer, self.ctx.store)
+        # No fallback. If the assistant cannot run, the officer is told that —
+        # he is not handed a graph lookup dressed up as an answer. `ask` is the
+        # bot doing its job or the bot being honestly unavailable, nothing in
+        # between; the API turns this into a 503 the UI shows with a retry.
+        answer = verify(
+            self._run(self._messages(question), system=self._system()), self.ctx.store)
+
+        self.ctx.store.say(role="shikonye", text=answer.get("answer", ""),
+                           answer=answer, node_ids=answer.get("cited_nodes") or [])
         self.ctx.chain.append(
             action="infer", actor="agent", ref=f"answer:{question[:80]}",
             payload={"answer": answer.get("answer"),
@@ -305,6 +336,83 @@ class CaseAgent:
         )
         return answer
 
+    # ------------------------------------------------- what the model receives
+
+    def _system(self) -> str:
+        """The standing brief: who it is, and which case it is on.
+
+        The case's identity belongs here rather than in the first user turn,
+        because it is true of every turn. Put it in a message and it either gets
+        repeated on each one or slides out of the window as the thread grows —
+        and an assistant that forgets which case it is on halfway through a
+        conversation is not a teammate.
+        """
+        overview = T.case_overview(self.ctx)
+        counts = overview["counts"]
+        return f"""{SYSTEM}
+
+THIS CASE
+
+{self._header()}
+
+It holds {counts['nodes']} entities and {counts['edges']} links drawn from {counts['documents']} documents. That is the whole of what you know about it; anything outside it you find with a tool or you do not say.
+
+What you have already concluded here:
+{_json(overview['conclusions'][:8])}
+
+What you are still holding open:
+{_json(overview['open_questions'][:8])}"""
+
+    def _messages(self, question: str) -> list[dict]:
+        """The conversation so far, then what he just said.
+
+        Referring expressions are resolved **structurally**, not hopefully: the
+        entities the last answer actually rested on are attached to this turn as
+        ids, so "him" and "that account" have something real to bind to. Asking
+        a model to remember harder is not a mechanism; handing it the ids is.
+        """
+        turns = self.ctx.store.conversation(limit=CONVERSATION_TURNS)
+        messages: list[dict] = []
+        for turn in turns[:-1]:            # the last turn is this question
+            role = "user" if turn["role"] == "officer" else "assistant"
+            text = (turn["text"] or "").strip()
+            if not text:
+                continue
+            if messages and messages[-1]["role"] == role:
+                messages[-1]["content"] += PARA + text
+            else:
+                messages.append({"role": role, "content": text})
+
+        content = question
+        focus = self._focus(turns)
+        if focus:
+            content += PARA + (
+                "[The entities your last answer rested on, in case I am referring "
+                "back to one of them: " + ", ".join(focus) + "]"
+            )
+        if messages and messages[-1]["role"] == "user":
+            messages[-1]["content"] += PARA + content
+        else:
+            messages.append({"role": "user", "content": content})
+
+        # A conversation must open with the officer, whatever the store holds.
+        while messages and messages[0]["role"] != "user":
+            messages.pop(0)
+        return messages
+
+    def _focus(self, turns: list[dict]) -> list[str]:
+        """Ids from the most recent answer, labelled — the referent set."""
+        for turn in reversed(turns):
+            if turn["role"] != "shikonye":
+                continue
+            out = []
+            for node_id in (turn.get("node_ids") or [])[:8]:
+                node = self.ctx.store.get_node(node_id)
+                if node:
+                    out.append(f"{node.label} ({node.id})")
+            return out
+        return []
+
     def _header(self) -> str:
         """The case's own identity and the officer's brief, in front of the
         agent on every turn. This is what lets one engine work a fraud case and
@@ -312,30 +420,22 @@ class CaseAgent:
         facts, this supplies what kind of case they belong to."""
         return agent_context_header(self.ctx.case_id) or f"Case {self.ctx.case_id}."
 
-    def _question_prompt(self, question: str) -> str:
-        overview = T.case_overview(self.ctx)
-        return (
-            f"{self._header()}\n\n"
-            f"The graph holds {overview['counts']['nodes']} entities "
-            f"and {overview['counts']['edges']} links from "
-            f"{overview['counts']['documents']} documents.\n\n"
-            f"What you already concluded on this case:\n{_json(overview['conclusions'][:8])}\n\n"
-            f"Questions you are still holding open:\n{_json(overview['open_questions'][:8])}\n\n"
-            f"The officer asks:\n\n{question}\n\n"
-            "Work it with your tools, verify the edges that matter against their source "
-            "documents, then answer."
-        )
-
     # ----------------------------------------------------------------- brief
 
     def brief(self, *, since_rev: int | None = None, actor: str = "system") -> dict:
         """What the assistant says on its own initiative.
 
-        The findings themselves are computed by `analytics/` — deterministic,
-        cited, and available with no API key. The model turns them into
-        something an officer can act on and files what it concludes. If there
-        is no model available, the deterministic brief is still returned: the
-        officer is never left with nothing.
+        The findings themselves are computed by `analytics/` — deterministic and
+        cited. The model turns them into something an officer can act on, files
+        what it concludes, and says it **into the case thread**, because a
+        briefing is the assistant talking and that is where it talks.
+
+        **It does not greet him twice for the same thing.** The front end calls
+        this every time the case is opened, so briefing unconditionally would
+        re-post the same paragraph on every visit and bill a model call for it.
+        If nothing has been found since the last briefing, the one it already
+        gave is returned as it stands. A teammate who repeats his opening line
+        every time you walk in is not one.
         """
         findings = (self.ctx.store.get_analytics("findings") or {}).get("value", []) or []
         counts = self.ctx.store.counts()
@@ -364,26 +464,49 @@ class CaseAgent:
             deterministic["narrative"] = narrative
             return deterministic
 
-        try:
-            narrative = self._run(self._brief_prompt(fresh or findings, counts))
-        except AgentUnavailable as exc:
-            narrative = self._offline_brief(findings, str(exc))
+        if not fresh:
+            spoken = self._last_briefing()
+            if spoken is not None:
+                deterministic["narrative"] = spoken
+                deterministic["repeat"] = True
+                return deterministic
 
-        deterministic["narrative"] = verify(narrative, self.ctx.store)
-        for f in fresh[:6]:
+        # Exactly what the model is shown is exactly what gets marked delivered.
+        # It used to be shown eight and mark six, so two findings were quietly
+        # re-briefed for ever and "nothing new to say" could never come true on a
+        # case with more than a handful of them.
+        shown = (fresh or findings)[:BRIEF_FINDINGS]
+        narrative = verify(
+            self._run(self._brief_prompt(shown, counts),
+                      system=self._system()), self.ctx.store)
+        deterministic["narrative"] = narrative
+        # It said this on this case, so it belongs in the thread the officer
+        # reads — not only in the response to whoever happened to call /brief.
+        self.ctx.store.say(role="shikonye", text=narrative.get("answer", ""),
+                           answer=narrative,
+                           node_ids=narrative.get("cited_nodes") or [], actor=actor)
+        for f in shown:
             self.ctx.store.remember(kind="briefing", text=f.get("headline", ""),
                                     node_ids=f.get("node_ids", []),
                                     edge_ids=f.get("edge_ids", []), status="delivered")
         return deterministic
 
+    def _last_briefing(self) -> dict | None:
+        """The briefing already in the thread, if there is one.
+
+        Read back out of the case rather than regenerated, so re-opening a case
+        is instant and free and shows the officer the same words he saw before.
+        """
+        for turn in reversed(self.ctx.store.conversation(limit=CONVERSATION_TURNS)):
+            if turn["role"] == "shikonye" and turn.get("answer"):
+                return turn["answer"]
+        return None
+
     def _brief_prompt(self, findings: list[dict], counts: dict) -> str:
         return (
-            f"{self._header()}\n\n"
-            f"It now holds {counts['nodes']} entities and "
-            f"{counts['edges']} links from {counts['documents']} documents.\n\n"
             "The analysis layer surfaced these, computed from the graph — they are facts, "
             "not suggestions, and you should verify the ones you lead with:\n"
-            f"{_json(findings[:8])}\n\n"
+            f"{_json(findings)}\n\n"
             "Brief the investigating officer. He has not looked at this case today and has "
             "no time to read it. Lead with the single thing that should change what he does "
             "next, verify it against a source document before you state it, and say plainly "
@@ -410,25 +533,33 @@ class CaseAgent:
             "way. Record what you conclude. If a specific missing document would settle it, "
             "request it by name."
         )
-        try:
-            answer = self._run(prompt)
-        except AgentUnavailable as exc:
-            answer = self._offline_finding(finding, str(exc))
-        return verify(answer, self.ctx.store)
+        answer = verify(self._run(prompt, system=self._system()), self.ctx.store)
+        self.ctx.store.say(role="shikonye", text=answer.get("answer", ""),
+                           answer=answer, node_ids=answer.get("cited_nodes") or [],
+                           actor="agent")
+        return answer
 
     # -------------------------------------------------------------- the loop
 
-    def _run(self, prompt: str) -> dict:
+    def _run(self, prompt: str | list[dict], *, system: str | None = None) -> dict:
         """One tool-driven run. The SDK's tool runner owns the loop; we own the
-        bound tools, the contract and the iteration cap."""
+        bound tools, the contract and the iteration cap.
+
+        `prompt` may be a single string or a **real conversation** — the list of
+        prior turns plus this one. It used to be a string only, which meant every
+        message the officer sent arrived cold: he was looking at a thread and
+        talking to something with no memory of the line above. "And what about
+        him?" could not work, because there was no him.
+        """
         import anthropic
 
+        messages = ([{"role": "user", "content": prompt}]
+                    if isinstance(prompt, str) else list(prompt))
         client = _client()
         try:
             runner = client.beta.messages.tool_runner(
                 model=ANTHROPIC_MODEL,
                 max_tokens=MAX_TOKENS,
-                system=SYSTEM,
                 tools=_bind(self.ctx),
                 max_iterations=MAX_TOOL_ITERATIONS,
                 thinking={"type": "adaptive"},
@@ -436,7 +567,8 @@ class CaseAgent:
                     "effort": EFFORT,
                     "format": {"type": "json_schema", "schema": ANSWER_SCHEMA},
                 },
-                messages=[{"role": "user", "content": prompt}],
+                system=system or SYSTEM,
+                messages=messages,
             )
             message = runner.until_done()
         except anthropic.NotFoundError as exc:
@@ -455,44 +587,3 @@ class CaseAgent:
         text = next((b.text for b in message.content if getattr(b, "type", "") == "text"), "")
         return parse(text)
 
-    # ------------------------------------------------------- offline fallback
-
-    def _offline_answer(self, question: str, reason: str) -> dict:
-        """No model? Still answer — and answer the *question*, not the name.
-
-        This used to hand the whole sentence to `find_entity`, which is a
-        substring match on labels, so any question phrased as a question matched
-        nothing at all. §9.2 demo query 1 is phrased as a question, so with no
-        key the centrepiece of the pitch returned "Nothing in this case matches
-        that name or identifier."
-
-        `agent/offline.py` routes it over the graph instead — a path between two
-        named entities, the centrality ranking, an entity profile, or the
-        candidates it could not choose between. On the demo machine at 11:00
-        this is the difference between a live system and a dead one.
-        """
-        return offline_mod.answer(self.ctx, question, reason)
-
-    def _offline_brief(self, findings: list[dict], reason: str) -> dict:
-        top = findings[0]
-        return {
-            "answer": top.get("detail") or top.get("headline", ""),
-            "cited_nodes": top.get("node_ids", []),
-            "cited_edges": top.get("edge_ids", []),
-            "highlight_path": top.get("node_ids", [])[:6],
-            "confidence": "medium",
-            "caveats": [
-                f"Written from the graph's own analysis; the reasoning model is unavailable "
-                f"({reason}). The finding itself is computed from the case data and stands.",
-            ],
-        }
-
-    def _offline_finding(self, finding: dict, reason: str) -> dict:
-        return {
-            "answer": finding.get("detail", ""),
-            "cited_nodes": finding.get("node_ids", []),
-            "cited_edges": finding.get("edge_ids", []),
-            "highlight_path": finding.get("node_ids", [])[:6],
-            "confidence": "low",
-            "caveats": [f"Not investigated — the reasoning model is unavailable ({reason})."],
-        }

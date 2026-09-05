@@ -16,7 +16,6 @@ from pathlib import Path
 
 import pytest
 
-from backend.agent import offline
 from backend.agent.contract import verify
 from backend.agent.loop import AgentUnavailable, CaseAgent
 from backend.agent.tools import CaseContext, find_entity, path_between, read_source_doc
@@ -630,92 +629,6 @@ def test_every_source_the_problem_statement_names_has_a_handler(demo):
             "intelligence"} <= kinds, f"missing: {kinds}"
 
 
-# --------------------------------------- the demo with no key (D11, §9.2, §13)
-
-def test_the_offline_fallback_answers_a_question_not_just_a_name(demo):
-    """§9.2 demo query 1, asked the way a person asks it, with no model.
-
-    The old fallback handed the whole sentence to `find_entity`, which is a
-    substring match on labels, so anything phrased as a question matched nothing
-    and returned "Nothing in this case matches that name or identifier." If the
-    round runs without the key — §13 says nobody knows yet whether it will —
-    that was the centrepiece question returning nothing on stage.
-    """
-    store, _ = demo
-    ctx = CaseContext(store, CustodyChain(DEMO))
-    answer = offline.answer(
-        ctx, "How is Ravi Kumar connected to account 50100244178?", "no key")
-
-    assert "50100244178" in answer["answer"]
-    assert "Ravi Kumar" in answer["answer"]
-    # The path is what lights the graph (D3). An answer about a connection that
-    # cannot show the connection is the theatre D3 exists to prevent.
-    assert len(answer["highlight_path"]) >= 2
-    assert answer["highlight_path"][0] == "person:ravi_kumar"
-    assert answer["highlight_path"][-1] == "account:50100244178"
-    assert answer["cited_edges"], "a path with no edges cited"
-
-    # Every id must survive verification, or the front end shows it as failed.
-    checked = verify(dict(answer), store)
-    assert checked["verified"]["ok"], checked["verified"]
-
-
-def test_the_offline_fallback_names_the_kingpin_and_not_the_busiest_person(demo):
-    """§9.2 demo query 2 offline — and the trap inside it.
-
-    Raw betweenness ranks Sukhwinder Kaur first; she is named in four documents
-    and is not news. The man the room is meant to see is fifth on that ranking
-    and appears in no report at all, which is what `hidden_broker` encodes.
-    Answering from the ranking would name the wrong person on stage.
-    """
-    store, _ = demo
-    ctx = CaseContext(store, CustodyChain(DEMO))
-    answer = offline.answer(ctx, "Who matters most in this case?", "no key")
-
-    # He must be what the answer *leads with*, not a name somewhere in it. The
-    # first version of this test asserted only that the string appeared, and it
-    # passed against a version that led with Sukhwinder Kaur and listed him
-    # third — which on stage is naming the wrong man and getting a tick for it.
-    assert answer["answer"].startswith("Harbhajan Dhillon"), answer["answer"][:120]
-    assert answer["highlight_path"] == ["person:harbhajan_dhillon"],         answer["highlight_path"]
-    # An /ask answer's highlight_path is an ordered route the UI walks hop by
-    # hop. A finding's node_ids is an unordered set, so handing the whole set
-    # over would draw a journey through a document and a handset that nobody
-    # can take. The subject alone, or a real path — never a set dressed as one.
-    top = top_influencers(store, "betweenness", limit=1)[0]["label"]
-    assert top != "Harbhajan Dhillon", \
-        "the demo no longer has a kingpin below the top of the raw ranking — " \
-        "this test is asserting nothing"
-    assert verify(dict(answer), store)["verified"]["ok"]
-
-
-def test_the_offline_fallback_says_what_it_could_not_resolve(demo):
-    """It must not quietly pick one of three candidates and present the result
-    as the answer — that is the well-formed-and-wrong failure this system is
-    built against. "Ludhiana" is three different nodes here."""
-    store, _ = demo
-    ctx = CaseContext(store, CustodyChain(DEMO))
-    hits = offline.mentions(ctx, "How is Ravi connected to the Ludhiana account?")
-    by_phrase = {h["phrase"]: h for h in hits}
-
-    assert "ravi" in by_phrase, hits
-    # A type word qualifies the phrase beside it, never the whole sentence.
-    # Applied sentence-wide, "account" resolved Ravi to the handle @ravi_ldh.
-    assert by_phrase["ravi"]["id"] == "person:ravi_kumar", by_phrase["ravi"]
-    assert len(by_phrase["ludhiana"]["candidates"]) > 1
-
-    answer = offline.answer(ctx, "How is Ravi connected to the Ludhiana account?", "no key")
-    assert any("could be" in c for c in answer["caveats"]), answer["caveats"]
-
-
-def test_a_sentence_naming_nothing_does_not_get_an_invented_answer(demo):
-    store, _ = demo
-    ctx = CaseContext(store, CustodyChain(DEMO))
-    answer = offline.answer(ctx, "What is the weather in Paris", "no key")
-    assert "could not identify" in answer["answer"]
-    assert "not an answer to your question" in answer["answer"]
-
-
 def test_brief_on_an_empty_case_carries_the_verified_block_5_6_promises():
     """§5.6 describes `verified` as always present. `/brief` omitted it on a
     case with no documents, so the front end had to read a documented field
@@ -736,47 +649,6 @@ def test_brief_on_an_empty_case_carries_the_verified_block_5_6_promises():
         assert narrative["verified"]["ok"] is True
         assert narrative["verified"]["dropped_nodes"] == []
         assert narrative["verified"]["dropped_edges"] == []
-        store.close()
-    finally:
-        shutil.rmtree(case_dir(case), ignore_errors=True)
-
-
-def test_ask_itself_routes_the_question_when_the_model_is_unavailable():
-    """The seam, not the unit. `offline.answer` passing on its own proves
-    nothing about whether `ask()` reaches it — that is the same mistake the
-    upload-filename defect was, where every unit worked and the wiring did not.
-
-    `_run` is forced to fail rather than left to fail: on a machine that does
-    have the key this test would otherwise spend it, and README §11 says the
-    live call is run once, deliberately, and not by a test suite.
-    """
-    case = "test-offline-ask"
-    shutil.rmtree(case_dir(case), ignore_errors=True)
-    create_case(case, title="offline", case_type="fraud", exist_ok=True)
-    try:
-        store, chain = CaseStore(case), CustodyChain(case)
-        ingest_text(
-            store, chain,
-            "Complainant Ravi Kumar (mob. 9876543210) stated that accused Manjit Singh "
-            "called him from 9814227731 and demanded payment.",
-            filename="statement.txt",
-        )
-        recompute(store)
-
-        agent = CaseAgent(CaseContext(store, chain))
-
-        def unavailable(_prompt):
-            raise AgentUnavailable("forced offline for this test")
-
-        agent._run = unavailable
-        answer = agent.ask("How is Ravi Kumar connected to Manjit Singh?")
-
-        assert "Nothing in this case matches" not in answer["answer"], \
-            "ask() is still falling back to the name lookup"
-        assert "Ravi Kumar" in answer["answer"] and "Manjit Singh" in answer["answer"]
-        assert answer["highlight_path"], "a connection answer that lights nothing"
-        assert answer["verified"]["ok"], answer["verified"]
-        assert chain.verify()["valid"]
         store.close()
     finally:
         shutil.rmtree(case_dir(case), ignore_errors=True)
@@ -827,29 +699,203 @@ def test_the_tamper_tool_breaks_the_named_entry_and_restores_it(demo):
         "restore is not byte-identical — the demo cannot continue on this case"
 
 
-def test_the_offline_influence_answer_never_calls_an_undocumented_person_documented(demo):
-    """The answer says the busiest people are "already in the reports". That is
-    a claim about the evidence, so it has to be read off the evidence.
+# ------------------------------------- the assistant works, or it says it cannot
 
-    It was not: the first version listed the top three by raw centrality, and
-    **Gurpreet Singh is third-highest among the non-subjects and is in no report
-    at all** — CDR, criminal register and a social export only. The answer named
-    him one sentence after saying the man who matters is the one in no report.
+def test_ask_reports_the_assistant_as_unavailable_rather_than_answering_anyway():
+    """D22. There is no fallback and there must not be one.
+
+    A degraded impostor — a graph lookup wearing the assistant's voice — is
+    worse than an outage, because the officer cannot tell which one he is
+    talking to. `/ask` returns **503** and the officer gets a retry; the graph,
+    the documents, the findings, the paths and the custody chain are all
+    untouched by this and stay fully usable.
+
+    `_run` is forced to fail rather than left to fail: on a machine that has the
+    key this would otherwise spend it, and the live call is run deliberately and
+    not by a test suite.
     """
-    store, _ = demo
-    ctx = CaseContext(store, CustodyChain(DEMO))
-    answer = offline.answer(ctx, "Who matters most in this case?", "no key")
+    from fastapi.testclient import TestClient
 
-    ranked = top_influencers(store, "betweenness", limit=5)
-    undocumented = [r for r in ranked if not offline._in_a_report(ctx, r["node_id"])]
-    assert undocumented, "no undocumented person in the top 5 — this test asserts nothing"
+    from backend.agent import loop as loop_mod
+    from backend.api.main import app
 
-    subject = set(
-        (store.get_analytics("findings") or {})["value"][0].get("node_ids") or []
-    )
-    for r in undocumented:
-        if r["node_id"] in subject:
-            continue   # the finding's own subject is named on purpose
-        assert r["label"] not in answer["answer"], (
-            f"{r['label']} is in no report and the answer lists them as documented"
-        )
+    case = "test-unavailable"
+    shutil.rmtree(case_dir(case), ignore_errors=True)
+    create_case(case, title="unavailable", exist_ok=True)
+    original = loop_mod.CaseAgent._run
+    try:
+        def unavailable(self, _prompt, **_kwargs):
+            raise AgentUnavailable("the assistant is not configured on this machine")
+
+        loop_mod.CaseAgent._run = unavailable
+        client = TestClient(app)
+
+        r = client.post(f"/api/cases/{case}/ask", json={"question": "Who matters most?"})
+        assert r.status_code == 503, r.text
+        assert "unavailable" in r.json()["detail"].lower()
+
+        # and nothing was invented on the way out
+        assert "cited_nodes" not in r.text
+
+        # the rest of the case is unaffected — this is an assistant outage, not
+        # a system outage, and the officer can still work the evidence.
+        assert client.get(f"/api/cases/{case}/graph").status_code == 200
+        assert client.get(f"/api/cases/{case}/documents").status_code == 200
+        assert client.get(f"/api/cases/{case}/custody").json()["verification"]["valid"]
+        assert client.get(f"/api/cases/{case}/analytics").status_code == 200
+    finally:
+        loop_mod.CaseAgent._run = original
+        shutil.rmtree(case_dir(case), ignore_errors=True)
+
+
+# ------------------------------------------- the assistant remembers the thread
+
+def test_the_conversation_lives_on_the_case_and_the_model_is_given_it():
+    """The thing that separates a teammate from a search box.
+
+    Every `ask` used to be one cold call: `messages=[{one prompt}]`. The officer
+    was looking at a thread and talking to something with no memory of the line
+    above it, so "and what about him?" could not work — there was no him.
+
+    The thread is on the case now, so it survives a reload, a different machine
+    and a colleague opening the same case, and `_run` receives the real exchange.
+    """
+    from backend.agent import loop as loop_mod
+
+    case = "test-conversation"
+    shutil.rmtree(case_dir(case), ignore_errors=True)
+    create_case(case, title="conversation", exist_ok=True)
+    seen = {}
+    original = loop_mod.CaseAgent._run
+    try:
+        store, chain = CaseStore(case), CustodyChain(case)
+        ingest_text(store, chain,
+                    "Complainant Ravi Kumar (mob. 9876543210) named accused Manjit Singh.",
+                    filename="statement.txt")
+        recompute(store)
+        agent = CaseAgent(CaseContext(store, chain))
+
+        def capture(self, prompt, **kwargs):
+            seen["messages"] = prompt
+            seen["system"] = kwargs.get("system") or ""
+            return {"answer": "Manjit Singh.", "cited_nodes": ["person:manjit_singh"],
+                    "cited_edges": [], "highlight_path": ["person:manjit_singh"],
+                    "claim_type": "evidence", "confidence": "high", "caveats": []}
+
+        loop_mod.CaseAgent._run = capture
+
+        agent.ask("Who did Ravi name?")
+        first = seen["messages"]
+        assert isinstance(first, list), "the model is still getting one cold prompt"
+        assert len(first) == 1 and first[0]["role"] == "user"
+
+        agent.ask("And what about him?")
+        second = seen["messages"]
+        roles = [m["role"] for m in second]
+        assert roles == ["user", "assistant", "user"], roles
+        assert "Who did Ravi name?" in second[0]["content"]
+        assert "Manjit Singh." in second[1]["content"]
+
+        # "him" is bound to an id, structurally — not left to luck.
+        assert "person:manjit_singh" in second[-1]["content"]
+
+        # the case identity is standing context, not repeated in every turn
+        assert "conversation" in seen["system"] or case in seen["system"] \
+            or "entities" in seen["system"]
+
+        # and it is readable back off the case, which is what makes it shared
+        turns = store.conversation()
+        assert [t["role"] for t in turns] == [
+            "officer", "shikonye", "officer", "shikonye"]
+        store.close()
+    finally:
+        loop_mod.CaseAgent._run = original
+        shutil.rmtree(case_dir(case), ignore_errors=True)
+
+
+def test_a_conversational_answer_is_not_branded_unverified():
+    """An officer talks to a teammate about more than the graph. "What should I
+    ask the bank for?" cites no node because it asserts no case fact, and the
+    citation rule used to fail it — putting a red "could not be verified" panel
+    on half of a normal conversation, which trains him to ignore the one warning
+    that matters. The rule applies to claims about the case (§5.3 `claim_type`).
+    """
+    case = "test-claim-type"
+    shutil.rmtree(case_dir(case), ignore_errors=True)
+    create_case(case, title="claim", exist_ok=True)
+    try:
+        store = CaseStore(case)
+        guidance = verify({"answer": "Ask the bank for the KYC file on that account.",
+                           "cited_nodes": [], "cited_edges": [], "highlight_path": [],
+                           "claim_type": "guidance", "confidence": "medium",
+                           "caveats": []}, store)
+        assert guidance["verified"]["ok"] is True
+        assert not any("No verifiable citation" in c for c in guidance["caveats"])
+
+        # a claim about the case with nothing behind it still fails, loudly
+        claim = verify({"answer": "Manjit Singh owns that account.",
+                        "cited_nodes": [], "cited_edges": [], "highlight_path": [],
+                        "claim_type": "evidence", "confidence": "high",
+                        "caveats": []}, store)
+        assert claim["verified"]["ok"] is False
+        assert any("No verifiable citation" in c for c in claim["caveats"])
+
+        # and a fabricated id is stripped whatever kind of answer it is in
+        faked = verify({"answer": "See node.", "cited_nodes": ["person:nobody"],
+                        "cited_edges": [], "highlight_path": [],
+                        "claim_type": "guidance", "confidence": "low",
+                        "caveats": []}, store)
+        assert faked["cited_nodes"] == []
+        assert faked["verified"]["dropped_nodes"] == ["person:nobody"]
+        assert faked["verified"]["ok"] is False
+        store.close()
+    finally:
+        shutil.rmtree(case_dir(case), ignore_errors=True)
+
+
+def test_the_brief_does_not_greet_the_officer_twice_for_the_same_thing(demo):
+    """The front end calls /brief every time the case is opened. Briefing
+    unconditionally would re-post the same paragraph on every visit and bill a
+    model call for it."""
+    from backend.agent import loop as loop_mod
+
+    store, _result = demo
+    calls = []
+    original = loop_mod.CaseAgent._run
+    before = store.conversation()
+    try:
+        agent = CaseAgent(CaseContext(store, CustodyChain(DEMO)))
+
+        def once(self, _prompt, **_kwargs):
+            calls.append(1)
+            return {"answer": "Manjit Singh is worth a look.",
+                    "cited_nodes": ["person:manjit_singh"], "cited_edges": [],
+                    "highlight_path": [], "claim_type": "evidence",
+                    "confidence": "medium", "caveats": []}
+
+        loop_mod.CaseAgent._run = once
+
+        # It keeps talking while it still has findings he has not been told
+        # about, and then it stops. Both halves matter: a teammate who goes
+        # quiet with news is useless, and one who repeats himself is noise.
+        last = None
+        for _ in range(12):
+            last = agent.brief()
+            if last.get("repeat"):
+                break
+        assert last is not None and last.get("repeat") is True, \
+            "the case never ran out of new things to say"
+
+        settled = len(calls)
+        again = agent.brief()
+        assert len(calls) == settled, "briefed again with nothing new to say"
+        assert again["repeat"] is True
+        assert again["narrative"]["answer"] == last["narrative"]["answer"]
+
+        spoken_before = len([t for t in store.conversation() if t["role"] == "shikonye"])
+        agent.brief()
+        spoken_after = len([t for t in store.conversation() if t["role"] == "shikonye"])
+        assert spoken_after == spoken_before, "the officer was greeted again"
+    finally:
+        loop_mod.CaseAgent._run = original
+        store.clear_conversation()
