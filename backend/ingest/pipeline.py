@@ -16,12 +16,18 @@ Two structural rules this module exists to hold:
   natural keys are stable, so re-running the generator or re-uploading an FIR
   merges rather than doubles. The demo depends on this.
 
-Structured sources (CDR, bank statements) become real typed edges — `CALLED`,
-`TRANSFERRED_TO`. Unstructured prose becomes `MENTIONED_IN` plus weak
-`CO_OCCURS` links, and `OWNS` where a phone sits right beside a person's name.
-Weak links are marked weak (low `weight`, low `confidence`) rather than
-excluded, because betweenness over a graph of only strong edges misses exactly
-the broker the demo is built to find.
+Structured sources (CDR, bank statements, social exports, criminal history)
+become real typed edges — `CALLED`, `TRANSFERRED_TO`, `MESSAGED`, and the
+`co_accused` link between two names on one charge sheet. Unstructured prose
+becomes `MENTIONED_IN` plus weak `CO_OCCURS` links, and `OWNS` where a phone
+sits right beside a person's name. Weak links are marked weak (low `weight`,
+low `confidence`) rather than excluded, because betweenness over a graph of
+only strong edges misses exactly the broker the demo is built to find.
+
+**One document kind is discounted rather than trusted.** An intelligence report
+is an assessment, and it carries a source grading that says how much of one
+(`readers.read_grading`). That grading multiplies the confidence of everything
+*inferred* from the report — never of the fact that it names who it names.
 """
 
 from __future__ import annotations
@@ -39,7 +45,7 @@ from backend.graph.store import CaseStore
 from backend.ingest import structured
 from backend.ingest.ner import extract_named_entities
 from backend.ingest.patterns import Extraction, extract_datetimes, extract_identifiers
-from backend.ingest.readers import ReadResult, read_document
+from backend.ingest.readers import ReadResult, confidence_factor, read_document
 
 # How close two mentions must be, in characters, to count as co-occurring.
 # A paragraph, roughly. Document-wide pairing would make every FIR a clique.
@@ -131,7 +137,9 @@ def ingest_text(
     actor: str = "system",
 ) -> IngestResult:
     """Same pipeline for text that never was a file (a pasted statement)."""
-    read = ReadResult(text=text, kind=kind, sha256=sha256_hex(text))
+    factor, grading = confidence_factor(kind, text)
+    read = ReadResult(text=text, kind=kind, sha256=sha256_hex(text),
+                      meta={"confidence_factor": factor} | grading)
     return ingest_read(store, chain, read, doc_id=make_doc_id(store, filename, read.sha256),
                        filename=filename, actor=actor)
 
@@ -181,9 +189,23 @@ def ingest_read(
     # and buries the real structure under thousands of meaningless edges. The
     # structured handler above already produced this file's real edges; we
     # still sweep the text for identifiers in columns it did not recognise.
+    #
+    # An intelligence report is an assessment, not a record, so everything
+    # inferred from it enters the graph discounted by its source grading
+    # (readers.read_grading). 1.0 for every other kind of document.
+    factor = float(read.meta.get("confidence_factor", 1.0) or 1.0)
     entity_ids = _ingest_prose(store, read.text, doc_id=doc_id,
-                               link_proximity=not read.rows)
+                               link_proximity=not read.rows, confidence_factor=factor)
     result.entities = entity_ids
+    if factor < 1.0:
+        grading = read.meta.get("grading")
+        result.warnings.append(
+            f"Graded {grading}: everything inferred from this report enters the case at "
+            f"{factor:.0%} confidence."
+            if grading else
+            "This report carries no source grading. It is an assessment rather than a "
+            f"record, so what is inferred from it enters the case at {factor:.0%} confidence."
+        )
 
     after = store.counts()
     result.nodes_new = after["nodes"] - before["nodes"]
@@ -203,10 +225,17 @@ def ingest_read(
 
 def _ingest_prose(
     store: CaseStore, text: str, *, doc_id: str, link_proximity: bool = True,
+    confidence_factor: float = 1.0,
 ) -> list[str]:
     """Identifiers + names out of free text, then the links between them.
 
     `link_proximity=False` for structured files — see `ingest_read`.
+
+    `confidence_factor` discounts what is *inferred* from a graded intelligence
+    report. It does not touch `MENTIONED_IN`: that this name appears in this
+    document is a fact about the document, and it is true at full confidence no
+    matter how unreliable the source is. What the mention *implies* is the part
+    the grading applies to.
     """
     extractions = extract_identifiers(text) + extract_named_entities(text)
     dates = extract_datetimes(text)
@@ -235,7 +264,7 @@ def _ingest_prose(
         ))
 
     if link_proximity:
-        _link_proximity(store, placed, doc_id=doc_id)
+        _link_proximity(store, placed, doc_id=doc_id, confidence_factor=confidence_factor)
     return sorted({node_id for node_id, _, _ in placed})
 
 
@@ -249,7 +278,8 @@ def _window_for(pos: int, dates: list[tuple[int, int, str]]) -> tuple[str | None
     return stamps[0], stamps[-1]
 
 
-def _link_proximity(store: CaseStore, placed: list[tuple[str, int, int]], *, doc_id: str) -> None:
+def _link_proximity(store: CaseStore, placed: list[tuple[str, int, int]], *, doc_id: str,
+                    confidence_factor: float = 1.0) -> None:
     """`OWNS` where a phone sits beside a name; `CO_OCCURS` for everything else
     mentioned nearby. Both are weak by construction and labelled as such."""
     people = [(i, s, e) for i, s, e in placed if i.startswith("person:")]
@@ -277,7 +307,7 @@ def _link_proximity(store: CaseStore, placed: list[tuple[str, int, int]], *, doc
         store.upsert_edge(Edge(
             src=pid, dst=oid, type="OWNS",
             attrs={"basis": "text_proximity", "gap_chars": gap},
-            weight=1.0, confidence=OWNS_CONFIDENCE,
+            weight=1.0, confidence=round(OWNS_CONFIDENCE * confidence_factor, 3),
             sources=[{"doc_id": doc_id, "start": min(ps, os_), "end": max(pe, oe)}],
         ))
         owned.add((pid, oid))
@@ -293,7 +323,8 @@ def _link_proximity(store: CaseStore, placed: list[tuple[str, int, int]], *, doc
             store.upsert_edge(Edge(
                 src=src, dst=dst, type="CO_OCCURS",
                 attrs={"basis": "same_document", "gap_chars": max(gap, 0)},
-                weight=CO_OCCUR_WEIGHT, confidence=CO_OCCUR_CONFIDENCE,
+                weight=CO_OCCUR_WEIGHT,
+                confidence=round(CO_OCCUR_CONFIDENCE * confidence_factor, 3),
                 sources=[{"doc_id": doc_id,
                           "start": min(a_s, b_s), "end": max(a_e, b_e)}],
             ))

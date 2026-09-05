@@ -35,6 +35,25 @@ WHAT IS PLANTED (§9.1), and where each demo beat comes from:
 * **Ordinary noise**: family calls, salary credits, unrelated numbers, so the
   structure is not visible by eye in the raw files.
 
+Added 2026-09-05, when the last three of §1.1's seven sources got handlers:
+
+* **A criminal register with two repeat offenders** — Manjit Singh and Suneel
+  Kumar, three prior cases each, one conviction each — and shared charge sheets
+  that link people the current case never links directly.
+* **An unattributed social handle**, `@ldh_travels_official`. Three people on
+  the Ludhiana side DM it and no file anywhere gives it a real name. It is the
+  social-media shape of the same blind spot the kingpin is.
+* **A C3-graded intelligence report** which says an organiser exists above the
+  intermediaries and cannot name him. Everything inferred from it enters the
+  graph at 70% confidence, and the system names the man anyway — from CDR
+  metadata the report never had.
+
+**Nothing added after 2026-09-04 crosses the Ludhiana/Delhi divide.** A
+co-accused or social edge between the two clusters would be a second bridge,
+and the kingpin's betweenness — the whole of demo query 2 — is earned by being
+the only one. `test_no_new_source_re_wires_the_two_clusters` enforces it, so
+whoever adds the next row finds out here rather than on stage.
+
 Run it:  python -m data.synthetic.generate --case demo-114
 Re-runs are safe: node ids and edge keys are stable, so ingesting twice merges.
 """
@@ -344,6 +363,147 @@ No other persons of interest were observed during the period.
     ]
 
 
+# -------------------------------------------------- criminal history file
+
+# Every prior case planted here links people who are ALREADY in the same
+# community. That is a deliberate constraint, not a lack of imagination: a
+# co-accused edge between the Ludhiana side and the Delhi side would be a
+# second bridge across the two clusters, and the kingpin's betweenness — the
+# whole of demo query 2 — is earned by being the only one. The register
+# deepens what the case already shows; it does not re-wire it.
+PRIOR_CASES = [
+    # Manjit Singh: the repeat offender on the Ludhiana side, one conviction.
+    {"accused_name": "Manjit Singh", "fir_no": "88/2019", "under_section": "IPC 370",
+     "fir_date": "14-03-2019", "police_station": "PS Dhandari Kalan",
+     "court": "Sessions Court Ludhiana", "disposal": "Convicted",
+     "co_accused": "Sukhwinder Kaur", "role": "main accused"},
+    {"accused_name": "Manjit Singh", "fir_no": "212/2021", "under_section": "IPC 420",
+     "fir_date": "02-09-2021", "police_station": "PS Dhandari Kalan",
+     "court": "JMIC Ludhiana", "disposal": "Pending trial", "co_accused": "", "role": ""},
+    {"accused_name": "Manjit Singh", "fir_no": "47/2023", "under_section": "IPC 366",
+     "fir_date": "21-01-2023", "police_station": "PS Sahnewal",
+     "court": "Sessions Court Ludhiana", "disposal": "Acquitted",
+     "co_accused": "Gurpreet Singh", "role": "accused"},
+
+    # Suneel Kumar: the same pattern on the Delhi side.
+    {"accused_name": "Suneel Kumar", "fir_no": "19/2020", "under_section": "IPC 370",
+     "fir_date": "08-02-2020", "police_station": "PS Kapashera",
+     "court": "Sessions Court Dwarka", "disposal": "Convicted",
+     "co_accused": "Parminder Sethi", "role": "main accused"},
+    {"accused_name": "Suneel Kumar", "fir_no": "133/2022", "under_section": "IPC 370/34",
+     "fir_date": "17-06-2022", "police_station": "PS Kapashera",
+     "court": "Sessions Court Dwarka", "disposal": "Pending trial",
+     "co_accused": "Nisha Rani", "role": "accused"},
+    {"accused_name": "Suneel Kumar", "fir_no": "08/2024", "under_section": "IPC 363",
+     "fir_date": "11-01-2024", "police_station": "PS Dwarka North",
+     "court": "JMIC Dwarka", "disposal": "Under investigation", "co_accused": "", "role": ""},
+
+    # Ordinary record, below the repeat-offender threshold — so the finding has
+    # something to not fire on.
+    {"accused_name": "Ravi Kumar", "fir_no": "301/2022", "under_section": "IPC 279",
+     "fir_date": "30-11-2022", "police_station": "PS Dhandari Kalan",
+     "court": "JMIC Ludhiana", "disposal": "Acquitted", "co_accused": "", "role": ""},
+    {"accused_name": "Nisha Rani", "fir_no": "77/2021", "under_section": "IPC 411",
+     "fir_date": "19-05-2021", "police_station": "PS Kapashera",
+     "court": "JMIC Dwarka", "disposal": "Acquitted", "co_accused": "", "role": ""},
+    {"accused_name": "Gurpreet Singh", "fir_no": "254/2020", "under_section": "IPC 323",
+     "fir_date": "07-10-2020", "police_station": "PS Sahnewal",
+     "court": "JMIC Ludhiana", "disposal": "Compounded", "co_accused": "", "role": ""},
+]
+
+
+def build_history() -> list[dict]:
+    return list(PRIOR_CASES)
+
+
+# ---------------------------------------------------- social media intel file
+
+# `ldh_travels_official` carries no display name anywhere in this file, and
+# three separate people DM it. It is the social-media shape of the same blind
+# spot the kingpin is: an actor the network revolves around that no document
+# ever attaches to a human being.
+SOCIAL_ROWS = [
+    ("instagram", "ravi_ldh", "Ravi Kumar", "follow", "manjit_s", 22, "", ""),
+    ("instagram", "ravi_ldh", "Ravi Kumar", "follow", "sukhi_k", 22, "", ""),
+    ("instagram", "manjit_s", "Manjit Singh", "follow", "gurpreet_gs", 21, "", ""),
+    ("instagram", "ravi_ldh", "Ravi Kumar", "dm", "ldh_travels_official", 9,
+     "gaddi kal raat tak ready ho jayegi?", ""),
+    ("instagram", "manjit_s", "Manjit Singh", "dm", "ldh_travels_official", 8,
+     "teen hain, subah nikalna hai", ""),
+    ("instagram", "sukhi_k", "Sukhwinder Kaur", "dm", "ldh_travels_official", 6,
+     "paisa aa gaya kya", ""),
+    ("instagram", "ldh_travels_official", "", "mention", "ravi_ldh; manjit_s", 5,
+     "booking confirmed for tomorrow", "Dhandari Kalan, Ludhiana"),
+    ("instagram", "gurpreet_gs", "Gurpreet Singh", "reply", "manjit_s", 4,
+     "haan bhaji pta hai", ""),
+
+    ("facebook", "suneel_delhi", "Suneel Kumar", "follow", "nisha_r", 20, "", ""),
+    ("facebook", "suneel_delhi", "Suneel Kumar", "dm", "parminder_sethi", 7,
+     "gaadi pahunch rahi hai raat ko", ""),
+    ("facebook", "nisha_r", "Nisha Rani", "reply", "suneel_delhi", 6, "theek hai", ""),
+    ("facebook", "parminder_sethi", "Parminder Sethi", "mention", "suneel_delhi", 3,
+     "shipment received", "Kapashera, New Delhi"),
+
+    # noise: two ordinary accounts with nothing to do with any of it
+    ("instagram", "kulwant_k", "Kulwant Kaur", "follow", "ravi_ldh", 30, "", ""),
+    ("instagram", "harleen_photo", "Harleen Kaur", "reply", "kulwant_k", 26,
+     "lovely pictures", ""),
+]
+
+
+def build_social() -> list[dict]:
+    rows = []
+    for platform, handle, display, action, target, days_before, text, place in SOCIAL_ROWS:
+        rows.append({
+            "platform": platform,
+            "handle": handle,
+            "display_name": display,
+            "interaction": action,
+            "to_handle": target,
+            "timestamp": _ts(INCIDENT - timedelta(days=days_before)),
+            "text": text,
+            "url": f"https://{platform}.com/{handle}",
+            "location": place,
+        })
+    return rows
+
+
+# ------------------------------------------------------ intelligence report
+
+# Graded C3 — "fairly reliable source, possibly true information" — so
+# everything inferred from it enters the graph at 70% confidence and the
+# officer is told so at upload. It names Jaswant Rai and it deliberately does
+# NOT name the kingpin: the report knows there is someone above the
+# intermediaries and cannot say who, and the system names him anyway from CDR
+# metadata. Adding him here would also break the claim demo query 2 rests on.
+INTELLIGENCE_REPORT = """INTELLIGENCE INPUT — LUDHIANA RANGE
+Reference: INT/LDH/2026/0431
+Date: 28 July 2026
+Source grading: C3
+Source reliability: C   Information credibility: 3
+
+1. A source in the Dhandari transport trade reports that a small group has been
+moving young women out of the villages east of Ludhiana over the past four
+months, using private taxis booked late at night rather than buses.
+
+2. The source names Jaswant Rai (mob. 9815778820) as the man who arranges the
+vehicles. He is described as taking instructions rather than giving them, and
+the source was clear that Rai is not the organiser.
+
+3. The source states that the money does not come from Ludhiana and that Rai is
+paid by someone he has never met in person. The source could not name this
+person and has not seen him. No description is available.
+
+4. The source also names Manjit Singh, already known to this office, as
+recruiting on the village side. This part of the report is uncorroborated.
+
+5. Assessment: the group is small, disciplined about phones, and appears to be
+one link in a longer chain. Identification of the organiser should be treated
+as the priority requirement.
+
+END OF REPORT
+"""
+
 # ------------------------------------------------------------------- writing
 
 def write_files(out_dir: Path, rng: random.Random) -> list[Path]:
@@ -371,6 +531,26 @@ def write_files(out_dir: Path, rng: random.Random) -> list[Path]:
         path.write_text(body, encoding="utf-8")
         written.append(path)
 
+    history = build_history()
+    history_path = out_dir / "criminal_history.csv"
+    with history_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(history[0]))
+        writer.writeheader()
+        writer.writerows(history)
+    written.append(history_path)
+
+    social = build_social()
+    social_path = out_dir / "social_media_intel.csv"
+    with social_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(social[0]))
+        writer.writeheader()
+        writer.writerows(social)
+    written.append(social_path)
+
+    intel_path = out_dir / "intelligence_input_ldh.txt"
+    intel_path.write_text(INTELLIGENCE_REPORT, encoding="utf-8")
+    written.append(intel_path)
+
     ground_truth = {
         "note": "What we planted. The demo proves the system found these without being told.",
         "kingpin": {
@@ -390,6 +570,34 @@ def write_files(out_dir: Path, rng: random.Random) -> list[Path]:
         },
         "spike": f"Six hours before {INCIDENT:%d %b %H:%M}, Ludhiana-side call volume rises sharply.",
         "handset_swap": "One IMEI carries 9814009977 and 9814003311 — the kingpin changing SIMs.",
+        "repeat_offenders": {
+            "Manjit Singh": "3 prior cases, one conviction under IPC 370.",
+            "Suneel Kumar": "3 prior cases, one conviction under IPC 370.",
+            "claim": "Both are found from the criminal history file alone, and both are "
+                     "already central in the current case — the register says the pattern "
+                     "is not new.",
+        },
+        "prior_associations": [
+            "Manjit Singh + Sukhwinder Kaur, FIR 88/2019 (convicted).",
+            "Suneel Kumar + Parminder Sethi, FIR 19/2020 (convicted).",
+        ],
+        "unattributed_handle": {
+            "handle": "@ldh_travels_official",
+            "claim": "Three Ludhiana-side people DM it and no file anywhere gives it a "
+                     "real name. The social-media shape of the same blind spot the "
+                     "kingpin is.",
+        },
+        "intelligence_grading": {
+            "document": "intelligence_input_ldh.txt",
+            "grading": "C3",
+            "claim": "Everything inferred from the report enters at 70% confidence, and "
+                     "the officer is told so at upload. The report says an organiser "
+                     "exists and cannot name him; the system names him from CDR "
+                     "metadata anyway.",
+        },
+        "clusters_not_re_wired": "No co-accused or social edge crosses the Ludhiana/Delhi "
+                                 "divide. The kingpin stays the only bridge, which is what "
+                                 "demo query 2 rests on.",
     }
     gt_path = out_dir / "GROUND_TRUTH.json"
     gt_path.write_text(json.dumps(ground_truth, indent=2), encoding="utf-8")

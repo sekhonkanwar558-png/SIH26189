@@ -50,11 +50,18 @@ _PLACE = rf"(?:{_NAME}(?:\s+\d{{1,3}})?|\d{{1,3}})"
 # and the person pattern then swallows "registered to Suneel Kumar" whole.
 _PERSON_CUES = [
     re.compile(r"\b(?i:complainant|accused|suspect|victim|witness|informant|deceased|"
-               r"one|named|arrested|absconding)\s+"
+               r"one|named|names|identifies|identified as|arrested|absconding)\s+"
                r"(?i:Shri|Smt\.?|Mr\.?|Mrs\.?|Ms\.?|Dr\.?|Kum\.?)?\s*"
                rf"(?P<name>{_NAME})"),
     re.compile(rf"\b(?i:Shri|Smt\.?|Mr\.?|Mrs\.?|Ms\.?|Dr\.?)\s+(?P<name>{_NAME})"),
     re.compile(rf"(?P<name>{_NAME})\s+(?i:s|w|d)/o\b"),
+    # Intelligence reports do not use FIR frames. They put the name first and
+    # the claim after it — "X is reported to be running the vehicles" — and
+    # with only the cues above, a graded report naming two men put neither of
+    # them in the graph. §1.1 lists intelligence reports as a source; a handler
+    # that reads the grading and drops the names is not one.
+    re.compile(rf"(?P<name>{_NAME}),?\s+(?:is|was|has been)?\s*"
+               r"(?i:reported|believed|assessed|suspected|understood)\s+to\s+be"),
 ]
 
 _ORG_CUES = [

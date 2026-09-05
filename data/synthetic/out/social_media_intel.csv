@@ -1,0 +1,15 @@
+platform,handle,display_name,interaction,to_handle,timestamp,text,url,location
+instagram,ravi_ldh,Ravi Kumar,follow,manjit_s,2026-07-12 22:10:00,,https://instagram.com/ravi_ldh,
+instagram,ravi_ldh,Ravi Kumar,follow,sukhi_k,2026-07-12 22:10:00,,https://instagram.com/ravi_ldh,
+instagram,manjit_s,Manjit Singh,follow,gurpreet_gs,2026-07-13 22:10:00,,https://instagram.com/manjit_s,
+instagram,ravi_ldh,Ravi Kumar,dm,ldh_travels_official,2026-07-25 22:10:00,gaddi kal raat tak ready ho jayegi?,https://instagram.com/ravi_ldh,
+instagram,manjit_s,Manjit Singh,dm,ldh_travels_official,2026-07-26 22:10:00,"teen hain, subah nikalna hai",https://instagram.com/manjit_s,
+instagram,sukhi_k,Sukhwinder Kaur,dm,ldh_travels_official,2026-07-28 22:10:00,paisa aa gaya kya,https://instagram.com/sukhi_k,
+instagram,ldh_travels_official,,mention,ravi_ldh; manjit_s,2026-07-29 22:10:00,booking confirmed for tomorrow,https://instagram.com/ldh_travels_official,"Dhandari Kalan, Ludhiana"
+instagram,gurpreet_gs,Gurpreet Singh,reply,manjit_s,2026-07-30 22:10:00,haan bhaji pta hai,https://instagram.com/gurpreet_gs,
+facebook,suneel_delhi,Suneel Kumar,follow,nisha_r,2026-07-14 22:10:00,,https://facebook.com/suneel_delhi,
+facebook,suneel_delhi,Suneel Kumar,dm,parminder_sethi,2026-07-27 22:10:00,gaadi pahunch rahi hai raat ko,https://facebook.com/suneel_delhi,
+facebook,nisha_r,Nisha Rani,reply,suneel_delhi,2026-07-28 22:10:00,theek hai,https://facebook.com/nisha_r,
+facebook,parminder_sethi,Parminder Sethi,mention,suneel_delhi,2026-07-31 22:10:00,shipment received,https://facebook.com/parminder_sethi,"Kapashera, New Delhi"
+instagram,kulwant_k,Kulwant Kaur,follow,ravi_ldh,2026-07-04 22:10:00,,https://instagram.com/kulwant_k,
+instagram,harleen_photo,Harleen Kaur,reply,kulwant_k,2026-07-08 22:10:00,lovely pictures,https://instagram.com/harleen_photo,

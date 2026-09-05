@@ -94,6 +94,24 @@ Two things follow from that table and both shape the build:
 
 **The department is Women Safety Division, not "MHA" generally.** The people evaluating this work on trafficking, repeat offenders, and cases that cross jurisdictions. Our demo case is built for them — see §9.
 
+### 1.2a Every source in §1.1, and what reads it
+
+The background paragraph lists **seven** sources by name. Each is a checkbox, and this is where each one stands — as of 2026-09-05 all seven have a handler and all seven appear in the demo case.
+
+| Source named in §1.1 | `kind` | Reader | What it produces |
+|---|---|---|---|
+| FIRs and police reports | `fir` | prose + cue NER | entities, `MENTIONED_IN`, weak `CO_OCCURS`, `OWNS` by proximity |
+| Call Detail Records | `cdr` | `structured._ingest_cdr` | `CALLED`, `MESSAGED`, `REGISTERED_TO`, `LOCATED_AT`, subscriber `OWNS` |
+| Financial transaction records | `financial` | `structured._ingest_financial` | `TRANSFERRED_TO`, holder `OWNS` |
+| Surveillance reports | `surveillance` | prose + cue NER | as FIR |
+| **Social media intelligence** | `social` | `structured._ingest_social` | handles as `account`, `MESSAGED` for DMs and replies, weak `CO_OCCURS` for mentions and follows, `LOCATED_AT` for geotags |
+| **Criminal history databases** | `history` | `structured._ingest_history` | prior cases as `event`, `MENTIONED_IN` per accused, **`CO_OCCURS` between co-accused**, `LOCATED_AT` to the station |
+| **Intelligence agency reports** | `intelligence` | prose + `readers.read_grading` | as FIR, **discounted by the report's Admiralty source grading** (D20) |
+
+The three in bold were built 2026-09-05. Before that a social export and a criminal register were read as `other` — the text was swept for identifiers and every relationship in the file was thrown away — and an intelligence report was filed as an ordinary `note` and believed as if it were an FIR.
+
+**The demo case carries one file of each**, so none of this is a claim about code that has never run: `test_every_source_the_problem_statement_names_has_a_handler`.
+
 **The theme says Blockchain & Cybersecurity and the statement never mentions blockchain.** Most teams will either ignore this or bolt on a pointless token. We do the honest version: a hash-chained chain of custody over evidence and inferences (§3.6). It is correct on its own merits for law-enforcement evidence, and it answers the theme without lying.
 
 ### 1.3 Timeline
@@ -187,6 +205,10 @@ PDF and text extraction, then two extractors in order:
 **Every extraction records where it came from** — document id and character offsets. This is not optional bookkeeping: it is what makes §3.4's citations possible, and citations are what make this system not a chatbot. **A node or edge with no provenance is a bug.**
 
 Why no LLM here: cost, speed, and determinism. An officer uploading 40 pages should wait seconds, not minutes, and the same document must produce the same entities every time.
+
+**Tables go to a handler, not to the identifier sweep.** `readers._classify_csv` picks the handler from columns nothing else has — a CDR, a bank statement, a social export or a criminal register — and `structured.ingest_rows` turns each row into typed edges. A table with no handler is still read and swept for identifiers, and it says so in `warnings`; what it loses is every *relationship* the columns encode, which is the whole value of a table. That was the state of social and criminal-history files until 2026-09-05.
+
+**One kind of document is discounted rather than believed.** An intelligence report is an assessment, and it carries an Admiralty source grading saying how much of one — `Source grading: C3`, or reliability and credibility on separate lines. `readers.read_grading` reads it and everything *inferred* from that report enters the graph at that confidence (D20). It never touches `MENTIONED_IN`: that the report names this man is a fact about the document and is true at full confidence however thin the source is.
 
 ### 3.2 The per-case graph
 
@@ -328,6 +350,9 @@ What makes a case specific is `case_type` and `brief` on the case itself (`backe
 | D16 | **Frontend stack: React + Vite + TypeScript, Tailwind CSS, Radix Primitives, Lucide, Cytoscape.js, TanStack Query and declarative React Router** | Jashan's call after choosing the full interaction system. It keeps the UI local-first, typed and compatible with the frozen HTTP API. | 09-05 |
 | D17 | **Calm Civic Forensic visual language; light mode only** | Officers need an interface that reads like dependable casework, not a technical or "hacker" console. Exact tokens and behavior are in §3.5a. | 09-05 |
 | D18 | **A document we could not read must say so; it must never ingest in silence** | A scan has no text layer, so every step after the reader succeeds on an empty string — the document registers, custody records it as evidence received, and no entity ever appears, with nothing saying why. That is worse than an error, because it is indistinguishable from a document that had nothing in it. `read_document` counts blank pages and returns a `warnings` list; `POST /documents` passes it through and **the front end must display it**. Adding OCR is a *separate* decision and is not taken here (§13). | 09-05 |
+| D19 | **The two sources added last introduced no new node or edge type** | §5.1 is frozen and the front end is being built against it three days out. A social handle is an `account` namespaced by platform, a prior case is an `event`, and what kind of link a `CO_OCCURS` is gets said in `attrs.basis` — where `text_proximity`, `cdr_handset` and `co_accused` all already live. A `FOLLOWS` and a `CHARGED_IN` edge would each read better and would each cost a contract change, a message to four people and a front-end update. **If you are about to add one, this is why it is not there.** | 09-05 |
+| D20 | **An intelligence report is graded, and what it implies is discounted** | §1.1 names intelligence agency reports as a source, and until now one was read as an ordinary note — an uncorroborated tip from an untested source entered the graph at exactly the confidence a bank record does. Intelligence carries the Admiralty grading (reliability A–F, credibility 1–6) for precisely this reason, and it maps onto §5.1's `confidence` almost exactly. The factor is the **lower** of the two axes, not their product: they are independent judgements in the standard and multiplying them invents a precision we do not have. An ungraded intelligence report still gets 0.7 — no grading is not the same as a good one. | 09-05 |
+| D21 | **`_hidden_brokers` ranks people against people** | Its bar was the fifth-highest betweenness across *every* node, and then only people were ever candidates. On the demo case three of the top five are a document, a bank statement and a travel agency — so "top five" quietly meant "top two people", and **the more documents an officer uploaded the fewer brokers the case could surface.** Adding the criminal-history source pushed the kingpin to sixth overall and deleted demo query 2 outright. The graph was right; the yardstick was wrong. Guarded by `test_the_broker_threshold_ranks_people_against_people`. | 09-05 |
 
 ---
 
@@ -700,7 +725,8 @@ The failure mode of a six-person hackathon is everyone building alone until hour
 
 | Part | State |
 |---|---|
-| Ingest — PDF/CSV/text, regex identifiers, cue NER, provenance | **built, tested** — PDF now exercised against a real file, both readable and scanned (2026-09-05) |
+| Ingest — PDF/CSV/text, regex identifiers, cue NER, provenance | **built, tested** — PDF exercised against a real file, readable and scanned (2026-09-05) |
+| **Sources — all seven of §1.1** | **built, tested** (2026-09-05) — social, criminal history and graded intelligence were the last three. See §1.2a |
 | Graph — SQLite per case, §5.1 schema, idempotent merge | **built, tested** |
 | Analytics — betweenness, pagerank, degree, Louvain, anomalies, findings | **built, tested** |
 | Agent — 9 read tools + 5 act tools, tool loop, §5.3 contract, self-verification | **built**, exercised offline |
@@ -710,7 +736,7 @@ The failure mode of a six-person hackathon is everyone building alone until hour
 | **Front end** | **in progress — React foundation, design tokens, live Cases list, case CRUD controls, persisted officer/accessibility settings, loading/empty/error states built** |
 | `docs/demo-script.md` | **NOT WRITTEN** — workstream F |
 
-**Verified against the demo case**, `python -m pytest tests -q` → **14 passed**:
+**Verified against the demo case**, `python -m pytest tests -q` → **25 passed**:
 
 - The kingpin is named in **no report** — only in CDR metadata — and the system **leads with him**: *"Harbhajan Dhillon connects this network but appears in no report."* (§9.2 query 2.)
 - Ravi reaches the Delhi account **through the tower co-location**, and there is provably no call between the two numbers, so the system cannot claim contact. (§9.2 query 1.)
@@ -719,8 +745,11 @@ The failure mode of a six-person hackathon is everyone building alone until hour
 - A 40-page document ingests and re-runs all analytics in **well under a second**.
 - A **real two-page FIR in PDF** — tables, wrapped lines, a case that continues across the page break — reaches the graph with its people, both phone numbers, the vehicle and the account, and the citation opens.
 - A **scanned PDF** returns a warning saying it could not be read, instead of registering as evidence and adding nothing.
+- A **criminal register** names Manjit Singh and Suneel Kumar as repeat offenders — three prior cases each, one conviction each — and links four pairs of people through a **shared charge sheet**, which nothing in the current case links directly.
+- A **C3-graded intelligence report** enters everything it implies at **70% confidence** and says so at upload, while the fact that it names those men stays at 100%.
+- **No source added after 09-04 crosses the Ludhiana/Delhi divide**, so the kingpin is still the only bridge and demo query 2 still works. This is asserted, not assumed.
 
-Demo case, for scale: **94 entities, 1,087 links, 6 documents, 6 communities, 38 anomalies, 20 findings.**
+Demo case, for scale: **125 nodes (116 entities + 9 documents), 1,148 links, 9 documents, 7 communities, 38 anomalies, 26 findings.**
 
 **Not done, and honest about it:**
 
@@ -730,15 +759,23 @@ Demo case, for scale: **94 entities, 1,087 links, 6 documents, 6 communities, 38
 - `search_web` is a logged stub — no provider chosen.
 - **A scanned PDF is announced, not read.** There is no OCR and none was added; whether scans are in scope at all is still open (§13). What changed on 2026-09-05 is that the system now says so rather than accepting the file in silence.
 - **exposurie** (Kanwar's other project) is paused for this.
+- **The cue NER reads two intelligence frames, not every one.** "The source names X" and "X is reported to be …" are handled; a name followed by a subordinate clause before its verb is not, and that is spaCy's job (`ner_backend()` says which layers are live). Widening the regex to leap a clause is exactly the bug D15 records.
+- **Scans still are not read** — unchanged, and still §13's question.
 
 **Next, in order:**
 
 1. **Jashan builds the live case workspace against §5.6.** The Cases screen is complete. Next is the 60/40 `shikonye` + Connections split with real `/brief`, `/ask`, `/graph`, source and node-detail behavior.
-2. **The two sources in §1.1 with no handler**: *social media intelligence* and *criminal history databases*. Both are named in the problem statement, and §1.1 says every bullet is a checkbox a judge ticks. Cheap to add — a reader and an edge type each. **This is the next backend job.**
-3. **`docs/demo-script.md`** (workstream F), once the front end can show something.
-4. **The live API call, last** — see above.
+2. **`docs/demo-script.md`** (workstream F), once the front end can show something. **This is the next backend job** — it is now the only unbuilt thing on the backend side.
+3. **The live API call, last** — see above.
 
-*(PDF ingest was item 2 and is now done — 2026-09-05, §12. A real two-page FIR reaches the graph; a scan says it could not be read instead of failing quietly.)*
+*(PDF ingest and the three missing §1.1 sources were items 2 and 3 and are both done — 2026-09-05, §12. Every source the problem statement names now has a handler and a file in the demo case: §1.2a.)*
+
+**Jashan — three things in this change touch what you draw**, and none of them changes §5.6:
+
+- **`event` nodes now appear in `/graph`.** `event` was always a legal §5.1 node type; it had never been in the demo data before. There are 12 on the demo case — 9 prior cases from the register, labelled `Case 88/2019`, with `attrs.offence`, `attrs.disposition` (`convicted` / `acquitted` / `pending` / `null`) and `attrs.station`; and 3 more that `patterns.py` has always pulled out of FIR numbers written in prose, which carry a bare label and no attrs.
+- **`MENTIONED_IN` is now a visible edge.** `/graph` drops document nodes by default, so `MENTIONED_IN` used to vanish with them. Person → prior-case edges are `MENTIONED_IN` and they survive that filter.
+- **Two new finding kinds**: `repeat_offender` and `prior_association`. Same shape as every other finding, so if you render by `kind` with a fallback they cost you nothing.
+- Also: `document.meta.grading` and `document.meta.confidence_factor` exist on intelligence documents, and the D18 `warnings` list carries a plain sentence about it. Displaying that is the same requirement D18 already put on you, not a new one.
 
 ---
 
@@ -759,6 +796,18 @@ Append one line per session. What you built · what you changed in this file · 
 - **2026-09-05 (Jashan + Codex)** — **frontend milestone 1 built.** Added the React + Vite + TypeScript application in `frontend/`, bundled Inter locally, established the Calm Civic Forensic tokens, added the 240px/72px desktop sidebar and labelled tablet drawer, and connected the Cases screen to the real `/api/cases` endpoint. Search and filters, detailed case cards, create/edit/pause/close/delete controls, typed-title delete confirmation, persisted officer and accessibility settings, skeleton/empty/reconnect states and four-second success feedback are implemented. Browser QA created a temporary case through the real API, verified it appeared first, then removed that exact temporary case through typed-title confirmation; desktop and tablet layouts have zero browser console errors. `pnpm --dir frontend build`, `pnpm --dir frontend lint` and all 12 backend tests pass. §3.5a records Jashan's locked design direction; D16–D17 record the frontend stack and visual language. Next: replace the temporary case route with the live 60/40 `shikonye` + Connections workspace.
 
 - **2026-09-05 (Kanwar + Claude)** — **PDF ingest exercised end to end, and the silent failure under it closed.** Two committed fixtures in `tests/fixtures/`: a real two-page FIR laid out like the form (tables, wrapped lines, a statement continuing past the page break) and the same document as an image-only scan. The readable one reaches the graph correctly — Ravi Kumar, Harbhajan Dhillon, a hyphenated number on page 1, a second number on page 2, the vehicle, the account — and its citation opens. **The scan did not: it registered as evidence, wrote a valid custody entry, produced zero entities and said nothing at all** (200, `warnings: []`). Fixed per **D18** — `_read_pdf` now counts blank pages and returns plain-language warnings, which `POST /documents` already passes through in `document.warnings`; **Jashan, the front end must display these.** Two further defects found by the same exercise: every `.pdf` was labelled `kind="fir"` regardless of content (a bank-statement PDF is a source §1.1 names, and `kind` is what the agent is told the document *is*) — PDFs are now classified from their text like every other prose document, and one we could not read a word of is `other` rather than a confident guess; and an encrypted or corrupt PDF raised a raw pypdf error into a **500**, now a **415** with one readable sentence. No OCR was added and §13 records why that stays Kanwar's call. Also corrected §7: `pnpm` is not on every machine here, so the setup block now names `corepack enable` / `npx pnpm@10`. **12 → 14 tests, all passing.** Next backend job is the two §1.1 sources with no handler.
+
+- **2026-09-05 (Kanwar + Claude)** — **the last three sources in §1.1 now have handlers, and the demo case carries one file of each.** New **§1.2a** is the coverage table: seven sources named in the problem statement, seven readers, all seven exercised. What the next agent needs to know:
+  - **Social media intelligence** (`structured._ingest_social`). Handles become `account` nodes **namespaced by platform** — `@ravi_k` on Instagram and `@ravi_k` on X are two accounts, and §5.1 has no fuzzy matching to undo a merge afterwards. A DM or reply is `MESSAGED`; a mention or a follow is a weak `CO_OCCURS` carrying its `basis`. A display name buys a `person -[OWNS]-> account` edge at **0.45** — lower than the 0.6 text proximity earns in an FIR, because an FIR was written by an officer and a profile name was typed into a box by its owner.
+  - **Criminal history databases** (`structured._ingest_history`). A prior case is an `event` node keyed on the case number *alone*, deliberately: `patterns.py` has always pulled `FIR 88/2019` out of prose as `event:88_2019`, and the register has to land on the same node or the case an officer reads about and the case in the database are two different things. Each accused gets `MENTIONED_IN`; **co-accused get a `CO_OCCURS` at weight 1.0** — two names on one charge sheet is a relationship that predates every document in the current case, and it is the "hidden relationship among suspects" §1.1 opens with. `disposal` is normalised to `convicted` / `acquitted` / `pending`, and to **`null` when the word is not recognised** — never to `pending`.
+  - **Intelligence agency reports** — new **D20**. These were being read as ordinary notes, so an uncorroborated tip from an untested source entered the graph at the confidence a bank record does. `readers.read_grading` reads the Admiralty grading (`Source grading: C3`, or reliability and credibility on their own lines) and discounts everything *inferred* from the report. It does **not** touch `MENTIONED_IN`: that the report names this man is a fact about the document and is true whatever the source is worth. Ungraded intelligence still gets 0.7.
+  - **No new node or edge type — D19.** §5.1 is frozen and Jashan is building against it three days out. If you are about to add `FOLLOWS` or `CHARGED_IN`, D19 is why they are not there.
+  - **A real bug fell out of this, and it is the most important line in this entry — D21.** `_hidden_brokers` set its bar at the fifth-highest betweenness across *every* node, then only ever considered people. Three of the demo's top five are a document, a bank statement and a travel agency, so the bar was really "top two people" — **the more documents an officer uploaded, the fewer brokers the case could surface.** The extra density from the criminal register pushed the kingpin to sixth overall and **deleted demo query 2 outright**. Fixed by ranking people against people. Guarded by `test_the_broker_threshold_ranks_people_against_people`, which fails if the old line comes back.
+  - **`_undocumented_people` and `_hidden_brokers` now share `REPORT_KINDS`**, and `intelligence` is in it. A man named in an intelligence report is not invisible, however thin the report is. `cdr`, `financial`, `history` and `social` stay out: those are records of what somebody did, not accounts written by somebody watching.
+  - **Two NER cues added** for intelligence prose ("the source names X", "X is reported to be …"), because a graded report naming two men was putting neither in the graph. Deliberately not widened further: a pattern that leaps a subordinate clause is the D15 bug again.
+  - **Demo generator**: `criminal_history.csv`, `social_media_intel.csv` and `intelligence_input_ldh.txt`, with the plants recorded in `GROUND_TRUTH.json`. **Nothing added crosses the Ludhiana/Delhi divide** — a co-accused or social edge between the clusters would be a second bridge and the kingpin's betweenness is earned by being the only one. `test_no_new_source_re_wires_the_two_clusters` enforces it so the next person to add a row finds out here rather than on stage.
+  - **Jashan: `event` nodes and `MENTIONED_IN` edges now appear in `/graph`**, and there are two new finding kinds. §5.6 is unchanged — see the note at the end of §11.
+  - **14 → 25 tests, all passing.** Backend is now feature-complete against §1.1; `docs/demo-script.md` is the only unbuilt backend item left.
 
 ---
 

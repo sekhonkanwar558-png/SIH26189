@@ -34,5 +34,24 @@
     "claim": "Proximity, not contact. There is no call between these two numbers."
   },
   "spike": "Six hours before 03 Aug 22:10, Ludhiana-side call volume rises sharply.",
-  "handset_swap": "One IMEI carries 9814009977 and 9814003311 \u2014 the kingpin changing SIMs."
+  "handset_swap": "One IMEI carries 9814009977 and 9814003311 \u2014 the kingpin changing SIMs.",
+  "repeat_offenders": {
+    "Manjit Singh": "3 prior cases, one conviction under IPC 370.",
+    "Suneel Kumar": "3 prior cases, one conviction under IPC 370.",
+    "claim": "Both are found from the criminal history file alone, and both are already central in the current case \u2014 the register says the pattern is not new."
+  },
+  "prior_associations": [
+    "Manjit Singh + Sukhwinder Kaur, FIR 88/2019 (convicted).",
+    "Suneel Kumar + Parminder Sethi, FIR 19/2020 (convicted)."
+  ],
+  "unattributed_handle": {
+    "handle": "@ldh_travels_official",
+    "claim": "Three Ludhiana-side people DM it and no file anywhere gives it a real name. The social-media shape of the same blind spot the kingpin is."
+  },
+  "intelligence_grading": {
+    "document": "intelligence_input_ldh.txt",
+    "grading": "C3",
+    "claim": "Everything inferred from the report enters at 70% confidence, and the officer is told so at upload. The report says an organiser exists and cannot name him; the system names him from CDR metadata anyway."
+  },
+  "clusters_not_re_wired": "No co-accused or social edge crosses the Ludhiana/Delhi divide. The kingpin stays the only bridge, which is what demo query 2 rests on."
 }

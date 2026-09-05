@@ -24,7 +24,10 @@ PDF_SUFFIXES = {".pdf"}
 @dataclass
 class ReadResult:
     text: str
-    kind: str                                  # fir | cdr | financial | note | other
+    # fir | surveillance | intelligence | note        (prose)
+    # cdr | financial | social | history              (tables)
+    # other                                           (read, but unrecognised)
+    kind: str
     sha256: str
     rows: list[dict] = field(default_factory=list)   # populated for CSV
     meta: dict = field(default_factory=dict)
@@ -53,9 +56,12 @@ def read_document(path: Path, *, kind: str | None = None) -> ReadResult:
         # kind off page markers would put a confident label on a document
         # nobody has seen the inside of.
         read_kind = "other" if blank == pages else _classify_text(text)
+        final_kind = kind or read_kind
+        factor, grading = confidence_factor(final_kind, text)
         return ReadResult(
-            text=text, kind=kind or read_kind, sha256=digest,
-            meta={"pages": pages, "pages_without_text": blank},
+            text=text, kind=final_kind, sha256=digest,
+            meta={"pages": pages, "pages_without_text": blank,
+                  "confidence_factor": factor} | grading,
             warnings=warnings,
         )
 
@@ -68,7 +74,10 @@ def read_document(path: Path, *, kind: str | None = None) -> ReadResult:
 
     if suffix in TEXT_SUFFIXES or suffix == "":
         text = path.read_text(encoding="utf-8", errors="replace")
-        return ReadResult(text=text, kind=kind or _classify_text(text), sha256=digest)
+        final_kind = kind or _classify_text(text)
+        factor, grading = confidence_factor(final_kind, text)
+        return ReadResult(text=text, kind=final_kind, sha256=digest,
+                          meta={"confidence_factor": factor} | grading)
 
     raise ValueError(
         f"unsupported file type {suffix!r}. Supported: "
@@ -158,6 +167,10 @@ def _read_csv(path: Path) -> tuple[list[dict], str]:
 
 _CDR_HINTS = {"caller", "callee", "a_party", "b_party", "duration", "imei", "cell_id", "tower"}
 _FIN_HINTS = {"amount", "debit", "credit", "beneficiary", "remitter", "ifsc", "txn_id"}
+_HISTORY_HINTS = {"fir_no", "case_no", "crime_no", "offence", "offense", "co_accused",
+                  "disposal", "police_station", "ipc_section", "under_section", "prior_case"}
+_SOCIAL_HINTS = {"handle", "username", "screen_name", "platform", "followers", "post_id",
+                 "in_reply_to", "reply_to", "mentions", "to_handle", "from_handle"}
 
 
 def _classify_csv(rows: list[dict]) -> str:
@@ -166,13 +179,102 @@ def _classify_csv(rows: list[dict]) -> str:
         return "cdr"
     if cols & _FIN_HINTS:
         return "financial"
+    # Checked after the two above and not before: a table is a criminal-history
+    # or social export because of columns nothing else has, whereas `date` and
+    # `name` are in every file anyone has ever exported.
+    if cols & _HISTORY_HINTS:
+        return "history"
+    if cols & _SOCIAL_HINTS:
+        return "social"
     return "other"
 
 
 def _classify_text(text: str) -> str:
     head = text[:2000].lower()
+    # Intelligence is tested first because its cues are the specific ones. The
+    # FIR test below matches on "police station", which an intelligence report
+    # about a police station would trip.
+    if re.search(r"intelligence\s+(report|input|summary|assessment|note)|source\s+report"
+                 r"|\bint\.?\s+report\b|source\s+reliability|admiralty", head):
+        return "intelligence"
     if re.search(r"\bf\.?i\.?r\.?\b|first information report|police station", head):
         return "fir"
     if "surveillance" in head or "observation report" in head:
         return "surveillance"
     return "note"
+
+
+# ------------------------------------------- intelligence reports are graded
+
+# The Admiralty code (NATO STANAG 2511), which is what an intelligence report
+# actually carries: source reliability A-F, information credibility 1-6. It
+# maps onto `confidence` in §5.1 almost exactly, which is the whole reason to
+# read it — an assessment from an untested source should not enter the graph at
+# the same confidence as a bank record, and until now it did.
+_RELIABILITY = {"a": 1.0, "b": 0.85, "c": 0.7, "d": 0.45, "e": 0.25, "f": 0.5}
+_CREDIBILITY = {"1": 1.0, "2": 0.85, "3": 0.7, "4": 0.45, "5": 0.25, "6": 0.5}
+
+# `F` and `6` both mean "cannot be judged", not "false" — so both sit at the
+# neutral 0.5 rather than at the bottom of the scale.
+
+_GRADE_PAIR = re.compile(
+    r"\b(?:source\s+)?(?:grading|grade|admiralty|evaluation)\s*[:\-]?\s*([A-Fa-f])\s*([1-6])\b")
+_GRADE_RELIABILITY = re.compile(r"\breliability\s*[:\-]?\s*([A-Fa-f])\b", re.IGNORECASE)
+_GRADE_CREDIBILITY = re.compile(r"\bcredibility\s*[:\-]?\s*([1-6])\b", re.IGNORECASE)
+
+# An intelligence report that carries no grading at all. Still an assessment
+# rather than evidence, so it is discounted — but only to here, because an
+# ungraded report is not the same as a badly graded one.
+UNGRADED_INTELLIGENCE = 0.7
+
+
+def read_grading(text: str) -> dict:
+    """The source grading a report carries, and what it does to confidence.
+
+    Returns `{}` when there is none. `factor` is the **lower** of the two axes,
+    not their product: reliability and credibility are independent judgements
+    in the standard, and multiplying them invents a precision the code does not
+    have (a B2 is not 0.72 of anything). The conservative reading — an
+    assessment is worth its weaker axis — is also the one an analyst would
+    recognise.
+    """
+    head = text[:4000]
+    reliability = credibility = None
+
+    pair = _GRADE_PAIR.search(head)
+    if pair:
+        reliability, credibility = pair.group(1).lower(), pair.group(2)
+    else:
+        rel = _GRADE_RELIABILITY.search(head)
+        cred = _GRADE_CREDIBILITY.search(head)
+        reliability = rel.group(1).lower() if rel else None
+        credibility = cred.group(1) if cred else None
+
+    if not reliability and not credibility:
+        return {}
+
+    scores = [s for s in (_RELIABILITY.get(reliability or ""),
+                          _CREDIBILITY.get(credibility or "")) if s is not None]
+    if not scores:
+        return {}
+    return {
+        "source_reliability": (reliability or "").upper() or None,
+        "information_credibility": credibility,
+        "grading": f"{(reliability or '?').upper()}{credibility or '?'}",
+        "confidence_factor": round(min(scores), 3),
+    }
+
+
+def confidence_factor(kind: str, text: str) -> tuple[float, dict]:
+    """How much to discount what we infer from this document, and why.
+
+    Everything that is not an intelligence report returns 1.0 — an FIR, a CDR
+    and a bank statement are records of what happened, and the confidence
+    already attached to each edge type is the right number for them.
+    """
+    if kind != "intelligence":
+        return 1.0, {}
+    grading = read_grading(text)
+    if grading:
+        return grading["confidence_factor"], grading
+    return UNGRADED_INTELLIGENCE, {"grading": None, "confidence_factor": UNGRADED_INTELLIGENCE}
