@@ -327,6 +327,7 @@ What makes a case specific is `case_type` and `brief` on the case itself (`backe
 | D15 | **Proximity linking is for prose only, and claims the nearest name only** | Both learned by measurement, not opinion. Running co-occurrence over a CDR export links whoever sits in adjacent rows and added 606 meaningless edges, burying the real structure. And linking every person within the window to a nearby number gave Ravi ownership of Manjit's phone, which then produced a real-looking false path. | 09-04 |
 | D16 | **Frontend stack: React + Vite + TypeScript, Tailwind CSS, Radix Primitives, Lucide, Cytoscape.js, TanStack Query and declarative React Router** | Jashan's call after choosing the full interaction system. It keeps the UI local-first, typed and compatible with the frozen HTTP API. | 09-05 |
 | D17 | **Calm Civic Forensic visual language; light mode only** | Officers need an interface that reads like dependable casework, not a technical or "hacker" console. Exact tokens and behavior are in §3.5a. | 09-05 |
+| D18 | **A document we could not read must say so; it must never ingest in silence** | A scan has no text layer, so every step after the reader succeeds on an empty string — the document registers, custody records it as evidence received, and no entity ever appears, with nothing saying why. That is worse than an error, because it is indistinguishable from a document that had nothing in it. `read_document` counts blank pages and returns a `warnings` list; `POST /documents` passes it through and **the front end must display it**. Adding OCR is a *separate* decision and is not taken here (§13). | 09-05 |
 
 ---
 
@@ -474,7 +475,7 @@ Everything is scoped to a case. There is no endpoint that reads across cases exc
 | `GET` | `/api/cases/{id}` | meta + counts + documents + custody verification |
 | `PATCH` | `/api/cases/{id}` | update title / case_type / brief / status |
 | `DELETE` | `/api/cases/{id}?confirm={id}` | deletes the case directory |
-| `POST` | `/api/cases/{id}/documents` | multipart upload → `{document, analytics, counts}` |
+| `POST` | `/api/cases/{id}/documents` | multipart upload → `{document, analytics, counts}`. `document.warnings` is a list of plain-language strings and **must be shown to the officer when non-empty** (D18) — an unreadable scan returns 200 with a warning, not an error. A file that is not a readable PDF at all returns **415** with a one-sentence `detail`. |
 | `POST` | `/api/cases/{id}/documents/text` | `{filename, text, kind}` → same shape |
 | `GET` | `/api/cases/{id}/documents` | every document with kind, sha256, size |
 | `GET` | `/api/cases/{id}/source?doc_id=&start=&end=` | **the text behind a citation** |
@@ -559,7 +560,7 @@ pip install -r requirements.txt
 cp .env.example .env            # then put the key in .env — see §8
 
 python -m data.synthetic.generate --case demo-114   # build the demo case (§9)
-python -m pytest tests -q                           # 12 tests, all should pass
+python -m pytest tests -q                           # 14 tests, all should pass
 uvicorn backend.api.main:app --reload               # http://127.0.0.1:8000/docs
 ```
 
@@ -569,6 +570,8 @@ Run the frontend from a second terminal, still issuing commands from the reposit
 pnpm --dir frontend install
 pnpm --dir frontend dev                              # http://127.0.0.1:5173
 ```
+
+**If `pnpm` is not on your PATH** — it is not on every machine here — either `corepack enable` once, or put `npx pnpm@10` wherever this file says `pnpm`. Do not `npm install` in `frontend/`: it writes a second lockfile beside `pnpm-lock.yaml` and the two disagree.
 
 The Vite development server proxies `/api` to `http://127.0.0.1:8000`. Optional, non-secret officer display values are documented in `frontend/.env.example`. Never put a secret in a `VITE_` variable because Vite exposes it to the browser.
 
@@ -697,7 +700,7 @@ The failure mode of a six-person hackathon is everyone building alone until hour
 
 | Part | State |
 |---|---|
-| Ingest — PDF/CSV/text, regex identifiers, cue NER, provenance | **built, tested** |
+| Ingest — PDF/CSV/text, regex identifiers, cue NER, provenance | **built, tested** — PDF now exercised against a real file, both readable and scanned (2026-09-05) |
 | Graph — SQLite per case, §5.1 schema, idempotent merge | **built, tested** |
 | Analytics — betweenness, pagerank, degree, Louvain, anomalies, findings | **built, tested** |
 | Agent — 9 read tools + 5 act tools, tool loop, §5.3 contract, self-verification | **built**, exercised offline |
@@ -707,13 +710,15 @@ The failure mode of a six-person hackathon is everyone building alone until hour
 | **Front end** | **in progress — React foundation, design tokens, live Cases list, case CRUD controls, persisted officer/accessibility settings, loading/empty/error states built** |
 | `docs/demo-script.md` | **NOT WRITTEN** — workstream F |
 
-**Verified against the demo case**, `python -m pytest tests -q` → **12 passed**:
+**Verified against the demo case**, `python -m pytest tests -q` → **14 passed**:
 
 - The kingpin is named in **no report** — only in CDR metadata — and the system **leads with him**: *"Harbhajan Dhillon connects this network but appears in no report."* (§9.2 query 2.)
 - Ravi reaches the Delhi account **through the tower co-location**, and there is provably no call between the two numbers, so the system cannot claim contact. (§9.2 query 1.)
 - Two cases of **different kinds** (trafficking, vendor fraud) share nothing.
 - Altering one custody entry **breaks the chain at that entry**. (§9.3.)
 - A 40-page document ingests and re-runs all analytics in **well under a second**.
+- A **real two-page FIR in PDF** — tables, wrapped lines, a case that continues across the page break — reaches the graph with its people, both phone numbers, the vehicle and the account, and the citation opens.
+- A **scanned PDF** returns a warning saying it could not be read, instead of registering as evidence and adding nothing.
 
 Demo case, for scale: **94 entities, 1,087 links, 6 documents, 6 communities, 38 anomalies, 20 findings.**
 
@@ -723,16 +728,17 @@ Demo case, for scale: **94 entities, 1,087 links, 6 documents, 6 communities, 38
 
   **Deliberately deferred — Kanwar's call, 2026-09-04:** *"live test will be done only when every other part will be built by me and jashan."* Do **not** spend the key probing it before then. The reason it can wait is D11: findings, the graph, analytics and custody all work without a model, so nothing downstream is blocked on this answer. The reason it cannot wait forever is that it is a single point of failure on demo day. **Run it once, together, as soon as the front end can display the result — before the 8th, not on it.**
 - `search_web` is a logged stub — no provider chosen.
-- No PDF has been ingested end to end; the reader is written and the demo case is CSV and text.
+- **A scanned PDF is announced, not read.** There is no OCR and none was added; whether scans are in scope at all is still open (§13). What changed on 2026-09-05 is that the system now says so rather than accepting the file in silence.
 - **exposurie** (Kanwar's other project) is paused for this.
 
 **Next, in order:**
 
 1. **Jashan builds the live case workspace against §5.6.** The Cases screen is complete. Next is the 60/40 `shikonye` + Connections split with real `/brief`, `/ask`, `/graph`, source and node-detail behavior.
-2. **PDF ingested end to end.** The reader is written but has never seen a real file — the demo case is CSV and text. Real FIRs are PDFs, and a judge handing us one that fails is a bad thirty seconds.
-3. **The two sources in §1.1 with no handler**: *social media intelligence* and *criminal history databases*. Both are named in the problem statement, and §1.1 says every bullet is a checkbox a judge ticks. Cheap to add — a reader and an edge type each.
-4. **`docs/demo-script.md`** (workstream F), once the front end can show something.
-5. **The live API call, last** — see above.
+2. **The two sources in §1.1 with no handler**: *social media intelligence* and *criminal history databases*. Both are named in the problem statement, and §1.1 says every bullet is a checkbox a judge ticks. Cheap to add — a reader and an edge type each. **This is the next backend job.**
+3. **`docs/demo-script.md`** (workstream F), once the front end can show something.
+4. **The live API call, last** — see above.
+
+*(PDF ingest was item 2 and is now done — 2026-09-05, §12. A real two-page FIR reaches the graph; a scan says it could not be read instead of failing quietly.)*
 
 ---
 
@@ -752,6 +758,8 @@ Append one line per session. What you built · what you changed in this file · 
 
 - **2026-09-05 (Jashan + Codex)** — **frontend milestone 1 built.** Added the React + Vite + TypeScript application in `frontend/`, bundled Inter locally, established the Calm Civic Forensic tokens, added the 240px/72px desktop sidebar and labelled tablet drawer, and connected the Cases screen to the real `/api/cases` endpoint. Search and filters, detailed case cards, create/edit/pause/close/delete controls, typed-title delete confirmation, persisted officer and accessibility settings, skeleton/empty/reconnect states and four-second success feedback are implemented. Browser QA created a temporary case through the real API, verified it appeared first, then removed that exact temporary case through typed-title confirmation; desktop and tablet layouts have zero browser console errors. `pnpm --dir frontend build`, `pnpm --dir frontend lint` and all 12 backend tests pass. §3.5a records Jashan's locked design direction; D16–D17 record the frontend stack and visual language. Next: replace the temporary case route with the live 60/40 `shikonye` + Connections workspace.
 
+- **2026-09-05 (Kanwar + Claude)** — **PDF ingest exercised end to end, and the silent failure under it closed.** Two committed fixtures in `tests/fixtures/`: a real two-page FIR laid out like the form (tables, wrapped lines, a statement continuing past the page break) and the same document as an image-only scan. The readable one reaches the graph correctly — Ravi Kumar, Harbhajan Dhillon, a hyphenated number on page 1, a second number on page 2, the vehicle, the account — and its citation opens. **The scan did not: it registered as evidence, wrote a valid custody entry, produced zero entities and said nothing at all** (200, `warnings: []`). Fixed per **D18** — `_read_pdf` now counts blank pages and returns plain-language warnings, which `POST /documents` already passes through in `document.warnings`; **Jashan, the front end must display these.** Two further defects found by the same exercise: every `.pdf` was labelled `kind="fir"` regardless of content (a bank-statement PDF is a source §1.1 names, and `kind` is what the agent is told the document *is*) — PDFs are now classified from their text like every other prose document, and one we could not read a word of is `other` rather than a confident guess; and an encrypted or corrupt PDF raised a raw pypdf error into a **500**, now a **415** with one readable sentence. No OCR was added and §13 records why that stays Kanwar's call. Also corrected §7: `pnpm` is not on every machine here, so the setup block now names `corepack enable` / `npx pnpm@10`. **12 → 14 tests, all passing.** Next backend job is the two §1.1 sources with no handler.
+
 ---
 
 ## 13. Open questions
@@ -762,3 +770,4 @@ Answer these in-place when you learn the answer, and say who answered it.
 - **Does the internal round score prototype, presentation, or both?** The PEC circular does not say. Changes how hours 20–24 are spent.
 - **Is there a submission artefact besides the demo** — idea PPT, doc, video? The national round wants an idea presentation; the internal round's requirement is unconfirmed.
 - **Do we present live or pre-record?** Online mode; unconfirmed. If live, network failure is a real risk and the demo must run fully offline.
+- **Are scanned documents in scope?** Real FIRs are often photographs of paper, which have no text layer at all. As of 2026-09-05 the system detects them and says so (D18) but cannot read them; reading them means OCR, which is a dependency nobody has agreed to and which would put a lossy step in front of the graph. **Kanwar's call, not an agent's.**

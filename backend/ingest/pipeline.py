@@ -145,7 +145,8 @@ def ingest_read(
     filename: str,
     actor: str = "system",
 ) -> IngestResult:
-    result = IngestResult(doc_id=doc_id, kind=read.kind, chars=len(read.text))
+    result = IngestResult(doc_id=doc_id, kind=read.kind, chars=len(read.text),
+                          warnings=list(read.warnings))
     before = store.counts()
 
     store.register_document(

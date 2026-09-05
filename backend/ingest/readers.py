@@ -28,6 +28,7 @@ class ReadResult:
     sha256: str
     rows: list[dict] = field(default_factory=list)   # populated for CSV
     meta: dict = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
 
 
 def sha256_file(path: Path) -> str:
@@ -43,7 +44,20 @@ def read_document(path: Path, *, kind: str | None = None) -> ReadResult:
     digest = sha256_file(path)
 
     if suffix in PDF_SUFFIXES:
-        return ReadResult(text=_read_pdf(path), kind=kind or "fir", sha256=digest)
+        text, warnings, pages, blank = _read_pdf(path)
+        # Classified from what it says, like every other prose document. This
+        # branch used to assume "fir" for anything ending in .pdf, which is
+        # wrong for the bank statements and criminal-history printouts §1.1
+        # names as sources — and `kind` is what the agent is told it is.
+        # A PDF we could not read a word of is "other", not a note: guessing a
+        # kind off page markers would put a confident label on a document
+        # nobody has seen the inside of.
+        read_kind = "other" if blank == pages else _classify_text(text)
+        return ReadResult(
+            text=text, kind=kind or read_kind, sha256=digest,
+            meta={"pages": pages, "pages_without_text": blank},
+            warnings=warnings,
+        )
 
     if suffix in CSV_SUFFIXES:
         rows, text = _read_csv(path)
@@ -62,19 +76,72 @@ def read_document(path: Path, *, kind: str | None = None) -> ReadResult:
     )
 
 
-def _read_pdf(path: Path) -> str:
+# Fewer alphanumeric characters than this on a page and there is nothing on it
+# to read — a page number, or specks off a scan. A real page of an FIR runs to
+# several hundred.
+MIN_PAGE_CHARS = 12
+
+
+def _read_pdf(path: Path) -> tuple[str, list[str], int, int]:
+    """Text, and an honest account of what could not be read.
+
+    A scanned FIR is a photograph of a document: pypdf returns nothing for it,
+    and every step after this one then succeeds on an empty string. The
+    document registers, the custody chain records it as evidence received, and
+    not one entity ever appears — with nothing anywhere saying why. That is the
+    worst shape a failure can take in front of an investigator, because it is
+    indistinguishable from a document that genuinely had nothing in it.
+
+    So blank pages are counted and reported. *Reading* them is a different
+    question — OCR, and whether scans are in scope at all, is undecided (§13).
+    Saying they were not read is not, and does not wait on it.
+    """
     try:
         from pypdf import PdfReader
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("pypdf is required to ingest PDFs: pip install pypdf") from exc
 
-    reader = PdfReader(str(path))
-    pages = []
-    for i, page in enumerate(reader.pages, start=1):
+    try:
+        reader = PdfReader(str(path))
+        pdf_pages = list(reader.pages)
+    except Exception as exc:
+        # Encrypted, truncated, or not a PDF at all — pypdf raises a different
+        # type for each. The officer needs one sentence, and the API turns a
+        # ValueError into a readable 415 instead of a stack trace.
+        raise ValueError(
+            f"this PDF could not be opened ({exc}). If it is password-protected, "
+            "remove the password and upload it again."
+        ) from exc
+
+    pages: list[str] = []
+    blank = 0
+    for i, page in enumerate(pdf_pages, start=1):
+        try:
+            body = page.extract_text() or ""
+        except Exception:
+            body = ""          # one damaged page must not cost us the other 39
+        if sum(c.isalnum() for c in body) < MIN_PAGE_CHARS:
+            blank += 1
         # The marker is part of the text, so offsets stay valid and a citation
         # can be reported as "page N" without a second pass over the file.
-        pages.append(f"[page {i}]\n{page.extract_text() or ''}")
-    return "\n\n".join(pages)
+        pages.append(f"[page {i}]\n{body}")
+
+    total = len(pdf_pages)
+    warnings: list[str] = []
+    if total and blank == total:
+        warnings.append(
+            f"No text could be read from this PDF: all {total} "
+            f"page{'s' if total > 1 else ''} appear to be scanned images. "
+            "Nothing from this document has entered the case. Upload a text "
+            "PDF, or paste its contents in as text."
+        )
+    elif blank:
+        warnings.append(
+            f"{blank} of {total} pages in this PDF had no readable text and were "
+            "skipped: they appear to be scanned images. Everything on the other "
+            f"{total - blank} pages has been read."
+        )
+    return "\n\n".join(pages), warnings, total, blank
 
 
 def _read_csv(path: Path) -> tuple[list[dict], str]:

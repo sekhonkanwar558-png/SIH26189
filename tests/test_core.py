@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import shutil
 import time
+from pathlib import Path
 
 import pytest
 
@@ -22,7 +23,7 @@ from backend.config import case_dir
 from backend.custody.chain import CustodyChain
 from backend.graph.schema import Edge, Node, SourcelessFact, make_id
 from backend.graph.store import CaseStore
-from backend.ingest.pipeline import ingest_text
+from backend.ingest.pipeline import ingest_file, ingest_text
 from data.synthetic.generate import generate
 
 DEMO = "test-demo-114"
@@ -208,6 +209,72 @@ def test_every_citation_can_be_opened(demo):
     result = read_source_doc(ctx, source["doc_id"], source.get("start"), source.get("end"))
     assert "error" not in result
     assert result["text"].strip(), "the cited range is empty"
+
+
+# --------------------------------------------------------------------- pdf
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture
+def blank_case():
+    """A case of its own per test, torn down after. These ingest real files,
+    so they must not touch the demo the other tests assert against."""
+    case = "test-pdf"
+    shutil.rmtree(case_dir(case), ignore_errors=True)
+    create_case(case, title="pdf", exist_ok=True)
+    store, chain = CaseStore(case), CustodyChain(case)
+    yield store, chain
+    store.close()
+    shutil.rmtree(case_dir(case), ignore_errors=True)
+
+
+def test_a_real_pdf_reaches_the_graph_with_its_people_and_numbers(blank_case):
+    """Real FIRs are PDFs. Until this test existed the reader had never seen
+    one — it was written, and exercised only against .txt and .csv.
+
+    The fixture is a two-page FIR laid out the way the real form is, tables and
+    all, so page markers, line-wrapped sentences and a field split across a
+    page break are all in the path.
+    """
+    store, chain = blank_case
+    result = ingest_file(store, chain, FIXTURES / "fir-114-text.pdf")
+
+    assert result.kind == "fir", "a PDF that says FIRST INFORMATION REPORT is an FIR"
+    assert not result.warnings, result.warnings
+    assert "person:ravi_kumar" in result.entities
+    assert "person:harbhajan_dhillon" in result.entities
+    assert "phone:919876543210" in result.entities, "a hyphenated number on page 1"
+    assert "phone:919915566772" in result.entities, "a number on page 2"
+    assert "vehicle:pb10ab1234" in result.entities
+    assert "account:34567891234" in result.entities
+    assert chain.verify()["valid"]
+
+    # The citation must click through to the text the extractor actually read,
+    # which for a PDF is the extracted text and not the bytes.
+    ctx = CaseContext(store, chain)
+    source = store.get_node("person:ravi_kumar").sources[0]
+    opened = read_source_doc(ctx, source["doc_id"], source["start"], source["end"])
+    assert "Ravi" in opened["text"]
+
+
+def test_a_scanned_pdf_says_so_instead_of_ingesting_nothing_in_silence(blank_case):
+    """The failure that looks like success. A scan has no text layer, so every
+    step downstream succeeds on an empty string: the document registers, the
+    custody chain records it as evidence received, and no entity ever appears.
+
+    Before this test the officer got a green tick and an empty graph. The
+    document must still be *recorded* — that those bytes arrived is a fact the
+    chain has to hold — but it may not be recorded quietly.
+    """
+    store, chain = blank_case
+    result = ingest_file(store, chain, FIXTURES / "fir-114-scanned.pdf")
+
+    assert result.warnings, "a scanned PDF ingested without a word about it"
+    assert "scanned" in result.warnings[0].lower()
+    assert result.entities == []
+    assert chain.verify()["valid"], "the upload is still a custody event"
+    assert store.document(result.doc_id) is not None, "the document must still exist"
 
 
 # ------------------------------------------------------------------- speed
