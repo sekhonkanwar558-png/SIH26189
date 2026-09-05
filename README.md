@@ -84,6 +84,90 @@ they disagree with it.
 >
 > *"just one 'shikonye' in small letters everywhere without any logo"*
 
+### The pivot in full — every instruction, verbatim, in order
+
+**These are the actual prompts, unedited.** They are here rather than summarised
+because the next agent to pick this up needs to know what was asked for, not what
+I concluded from it — and because he gave the reasons as he went, and the reasons
+are the useful half.
+
+**On killing the offline path**
+
+> 1. *"hey wait why do we need that offline anyalsis anywhere, dont keep that at
+>    all, just keep llm calls only for every search from anything"*
+> 2. *"just remove that offline analysis shit from anywhere"*
+> 3. *"just keep bot peakk at its best working as true real assistant at any time
+>    an officer needs"*
+> 4. *"i will do real test after everythings will be made, you just make ittt for
+>    peak experience"*
+
+**On what shikonye has to be**
+
+> 5. *"our main target isss providing a peak assistant 'shikonye' working at all
+>    problems an officers talk to him, it should be like talking to some teammate
+>    and feel realistic"*
+> 6. *"it shouldnt just be a sloppy 'system prompt' behinddd"*
+> 7. *"it should feel like real shit and tempting to an officer to interact with
+>    it"*
+> 8. *"both the prompt and backend structure needs to be well sexyy peakkk"*
+> 9. *"not anything justt normal chattt doing everyhting an officer asks it to
+>    doo"*
+> 10. *"bit backend should peakesttttttt"*
+
+**On the interface**
+
+> 11. *"and dont just push slash commands at all, the bot or assistant should only
+>     fire from chat message, because we are making for non technical peopleee,
+>     make sure its too easy and just simple interactions but great peak machinery
+>     working at backend"*
+> 12. *"and even remove those different sections buttons of 'documents', other on
+>     side, just one chat interface and option to graphh, it should be veryy easyy
+>     to interact just one clean chatgpt like interface, but great shit at
+>     backend"*
+> 13. *"are you getting, we are shifting to great minimalistic chatgpt like chat
+>     interface, but great shts at backend"*
+> 14. *"add as less buttons and elements poosible, just keep shit very simple and
+>     minimallll"*
+> 15. *"front end very easyy to useee with less elements but with great chatgpt
+>     design, but at backend doing peak loops, graphs, shitttsss"*
+> 16. *"it should look peakk for an officer"*
+
+**On the look**
+
+> 17. *"and fix the design like it should look premium like chatgpt chat interface
+>     with buttons and all elements whitish and very sexy lookin, just copy
+>     chatgpt s chat design interface and for even graph designs liek chatgpt
+>     hasss"*
+> 18. *"just simply copy every chatgpts design elementtttt"*
+> 19. *"just simply copy everything from chagptsssss design every depth element"*
+> 20. *"at every point, pure lookin like chatgpt"*
+
+**On the name**
+
+> 21. *"and just remove that 'caselens' name and that logo of caselens from every
+>     place, just one name 'shikonye' both of bot and of page toooo, nothing logo
+>     and nothing elseee"*
+> 22. *"just one 'shikonye' in small letters everywhere without any logo or shitt,
+>     chatgpt but with great sexy peakkk depth case assistant"*
+
+**On how to carry it out**
+
+> 23. *"keep on deleting any old shit or elements you already did and work on this
+>     newww face, product is moving too"*
+> 24. *"just keep on deleting old design elementsssss, as you build newww designnn"*
+> 25. *"just keep on updating the products neww pivott in readmeesss"*
+> 26. *"it needs a big pivoottt now, just keep on digesting evryhting i am saying
+>     in prompts to readme to keep shit updated with new pivotts and keep on
+>     building"*
+> 27. *"its a whole new pivootttt"*
+
+**A note on #17–20, because an agent reading them literally will do the wrong
+thing.** "Copy ChatGPT" means the *idiom* — a centred column, a light near-white
+ground, a rounded composer with attach and send, a quiet conversation rail, the
+message treatment, generous whitespace. It does **not** mean their branding,
+wordmark, logo or proprietary assets, none of which are ours to ship. What was
+built follows the idiom and carries none of the marks.
+
 ### What that means, concretely
 
 1. **There is no offline mode and no fallback. Ever.** `/ask`, `/brief` and
@@ -890,8 +974,6 @@ Everything else still open here is a *known limit*, not a task: no OCR (§13), `
 
 ## 12. Changelog
 
-Append one line per session. What you built · what you changed in this file · what the next agent needs to know.
-
 - **2026-09-04** — README created. Problem statement recorded verbatim from sih.gov.in; architecture, decisions D1–D9 and contracts §5.1–5.5 written from the 09-03/09-04 design discussion. No code yet. Roster still unknown.
 
 - **2026-09-04, evening (Kanwar + Claude)** — **the whole backend, built and tested.** Ingest, graph, analytics, agent, custody, API, demo generator, 12 tests. What the next agent needs to know:
@@ -942,6 +1024,19 @@ Append one line per session. What you built · what you changed in this file · 
   - **`data/synthetic/tamper.py` makes the §9.3 beat performable.** There was no way to break the chain live — the UI has no tamper control, correctly. One command breaks entry 2, the API names it, `--restore` is byte-identical so the demo continues on the same case. **It refuses any case not marked `synthetic`**, and that check is not a flag.
   - **Two claims in the repo were wrong and are corrected.** A 40-page ingest plus full recompute takes **~1.4s**, not "well under a second" — true before the last three sources widened the recompute, measured now rather than estimated. And the demo script's first draft told the presenter to point at "five direct contacts" on Harbhajan's node; **the drawer shows two `OWNS` edges to his own SIMs**, because the five is computed on the person-projected graph (D13). A number that is not on screen is a number a judge will check.
   - **25 → 35 tests, all passing.** Frontend untouched: no contract moved.
+
+- **2026-09-05, night (Kanwar + Claude)** — **THE PIVOT. Read §0.5 before anything else in this file.** The product's face was replaced: one chat called `shikonye`, no offline mode, no CaseLens, no panels, no commands. The engine did not move. What the next agent needs to know:
+  - **§0.5 carries all 27 of his instructions verbatim**, in order, with the reasons he gave. That section is the source of truth for this pivot; where anything below it disagrees, §0.5 wins.
+  - **D22–D28 are new. D14, D16 and D17 are superseded**, and §3.5a is retired as the interface spec — kept only as the record of what was built and why it changed. **§10.1a/§10.1b no longer describe reality.** Jashan: nothing you built was wrong, the product moved under it.
+  - **`backend/agent/offline.py` is deleted.** `/ask`, `/brief` and `/investigate` return **503** when the model cannot be reached. **The key and a network are now demo-day requirements**, not "before the 8th" items — there is no version of this that survives a dead room, and that is deliberate (D22).
+  - **The conversation is a table on the case** (`store.say` / `store.conversation`, `GET`/`DELETE /api/cases/{id}/conversation`). `ask` used to send `messages=[{one prompt}]`: the officer read a thread and talked to something with no memory of it. The ids the last answer rested on are carried into the next turn **as ids** — D27.
+  - **`claim_type` is new on the §5.3 contract** (`evidence` | `guidance`) and `verify()` enforces citations only on `evidence`. Advice and clarifying questions assert no case fact; failing them put a red panel on half a normal conversation.
+  - **`/brief` is idempotent** and no longer greets on every case open. It also marked six findings delivered while showing eight, so "nothing new to say" could never come true; shown and delivered are the same number now (`BRIEF_FINDINGS`).
+  - **The front end is 8 files, down from 30** — `pages/Chat.tsx`, `components/GraphPanel.tsx`, `lib/api.ts`, `types.ts`, `config.ts`, `App.tsx`, `main.tsx`, `index.css`. Everything else was deleted, on his instruction, rather than left dead.
+  - **30 → 33 tests.** Build and lint clean. `docs/demo-script.md` updated: the offline variant is gone, and it now tells the presenter **never to type an entity id on stage** — saying "the Ludhiana account" and having it resolved is the demonstration (D26).
+
+
+Append one line per session. What you built · what you changed in this file · what the next agent needs to know.
 
 ---
 
