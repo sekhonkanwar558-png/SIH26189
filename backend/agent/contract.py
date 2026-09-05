@@ -58,6 +58,24 @@ def empty_answer(message: str, *, confidence: str = "low") -> dict:
             "highlight_path": [], "confidence": confidence, "caveats": []}
 
 
+def verified_vacuously() -> dict:
+    """The `verified` block for an answer that cites nothing *because there was
+    nothing to cite*.
+
+    §5.6 describes this block as always present, and it was not: `/brief` on a
+    case with no findings returned early with a bare message and no `verified`
+    at all, so the front end had to read a documented field defensively.
+
+    This is deliberately not `verify()` on an empty answer, which fails on
+    purpose: there, a model was asked about a case and answered without resting
+    on it. Here the system itself is saying it has found nothing yet — a
+    statement about the case, not a claim drawn from it. Nothing was checked, so
+    nothing was dropped and nothing failed. Reporting `ok: false` would put a
+    red "could not be verified" panel on every brand-new case.
+    """
+    return {"ok": True, "dropped_nodes": [], "dropped_edges": []}
+
+
 def parse(text: str) -> dict:
     """Structured outputs guarantee valid JSON in the first text block. This is
     the belt-and-braces path for the case where something upstream changed."""

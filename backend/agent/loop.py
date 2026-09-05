@@ -33,7 +33,9 @@ import os
 from typing import Any, Callable
 
 from backend.agent import tools as T
-from backend.agent.contract import ANSWER_SCHEMA, empty_answer, parse, verify
+from backend.agent import offline as offline_mod
+from backend.agent.contract import (ANSWER_SCHEMA, empty_answer, parse, verify,
+                                    verified_vacuously)
 from backend.agent.tools import CaseContext
 from backend.case import agent_context_header
 from backend.config import ANTHROPIC_MODEL
@@ -350,10 +352,16 @@ class CaseAgent:
         }
 
         if not findings:
-            deterministic["narrative"] = empty_answer(
+            # §5.6 says `verified` is always present on /brief. It was not here,
+            # and the front end had to read a documented field defensively.
+            # Nothing was cited because nothing has been found yet, which is a
+            # pass with nothing in it — not a verification failure.
+            narrative = empty_answer(
                 "Nothing stands out in this case yet. Add documents — CDRs and bank "
                 "statements produce the strongest links.", confidence="low",
             )
+            narrative["verified"] = verified_vacuously()
+            deterministic["narrative"] = narrative
             return deterministic
 
         try:
@@ -450,35 +458,20 @@ class CaseAgent:
     # ------------------------------------------------------- offline fallback
 
     def _offline_answer(self, question: str, reason: str) -> dict:
-        """No model? Still answer. A literal-name lookup plus the graph's own
-        findings beats an error message, and on the demo machine at 11:00 this
-        is the difference between a live system and a dead one."""
-        hits = T.find_entity(self.ctx, question)[:4]
-        node_ids = [h["id"] for h in hits]
-        edge_ids: list[str] = []
-        lines = []
-        if hits:
-            lines.append("Entities in this case matching that: "
-                         + ", ".join(f"{h['label']} ({h['id']})" for h in hits) + ".")
-            for h in hits[:2]:
-                nb = T.neighbours(self.ctx, h["id"], depth=1)
-                edge_ids += [e["id"] for e in nb["edges"] if e.get("id")][:6]
-                node_ids += [n["id"] for n in nb["nodes"]][:6]
-                lines.append(f"{h['label']} has {len(nb['edges'])} direct links.")
-        else:
-            lines.append("Nothing in this case matches that name or identifier.")
-        return {
-            "answer": " ".join(lines),
-            "cited_nodes": sorted(set(node_ids)),
-            "cited_edges": sorted(set(edge_ids))[:12],
-            "highlight_path": [],
-            "confidence": "low",
-            "caveats": [
-                f"The reasoning model is unavailable ({reason}), so this is a direct graph "
-                "lookup rather than an investigation. The graph, the findings and the "
-                "custody chain are unaffected.",
-            ],
-        }
+        """No model? Still answer — and answer the *question*, not the name.
+
+        This used to hand the whole sentence to `find_entity`, which is a
+        substring match on labels, so any question phrased as a question matched
+        nothing at all. §9.2 demo query 1 is phrased as a question, so with no
+        key the centrepiece of the pitch returned "Nothing in this case matches
+        that name or identifier."
+
+        `agent/offline.py` routes it over the graph instead — a path between two
+        named entities, the centrality ranking, an entity profile, or the
+        candidates it could not choose between. On the demo machine at 11:00
+        this is the difference between a live system and a dead one.
+        """
+        return offline_mod.answer(self.ctx, question, reason)
 
     def _offline_brief(self, findings: list[dict], reason: str) -> dict:
         top = findings[0]

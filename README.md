@@ -353,6 +353,8 @@ What makes a case specific is `case_type` and `brief` on the case itself (`backe
 | D19 | **The two sources added last introduced no new node or edge type** | §5.1 is frozen and the front end is being built against it three days out. A social handle is an `account` namespaced by platform, a prior case is an `event`, and what kind of link a `CO_OCCURS` is gets said in `attrs.basis` — where `text_proximity`, `cdr_handset` and `co_accused` all already live. A `FOLLOWS` and a `CHARGED_IN` edge would each read better and would each cost a contract change, a message to four people and a front-end update. **If you are about to add one, this is why it is not there.** | 09-05 |
 | D20 | **An intelligence report is graded, and what it implies is discounted** | §1.1 names intelligence agency reports as a source, and until now one was read as an ordinary note — an uncorroborated tip from an untested source entered the graph at exactly the confidence a bank record does. Intelligence carries the Admiralty grading (reliability A–F, credibility 1–6) for precisely this reason, and it maps onto §5.1's `confidence` almost exactly. The factor is the **lower** of the two axes, not their product: they are independent judgements in the standard and multiplying them invents a precision we do not have. An ungraded intelligence report still gets 0.7 — no grading is not the same as a good one. | 09-05 |
 | D21 | **`_hidden_brokers` ranks people against people** | Its bar was the fifth-highest betweenness across *every* node, and then only people were ever candidates. On the demo case three of the top five are a document, a bank statement and a travel agency — so "top five" quietly meant "top two people", and **the more documents an officer uploaded the fewer brokers the case could surface.** Adding the criminal-history source pushed the kingpin to sixth overall and deleted demo query 2 outright. The graph was right; the yardstick was wrong. Guarded by `test_the_broker_threshold_ranks_people_against_people`. | 09-05 |
+| D22 | **With no model, `/ask` routes the question over the graph — it does not fall back to a name lookup** | The old fallback handed the officer's whole sentence to `find_entity`, which is a substring match on labels, so anything phrased as a *question* matched nothing: §9.2 query 1 returned *"Nothing in this case matches that name or identifier."* The centrepiece of the pitch died with the network. `agent/offline.py` routes instead — two entities named gives the path between them, an influence question gives the finding, a type word gives what the case holds of that kind — and where it cannot resolve a phrase it **names the candidates rather than picking one**, because a router that guesses confidently is the failure D18 and D21 are both about. It cannot invent a node that is not there: "the Ludhiana account" is how a person speaks and `account:50100244178` is what the graph holds, which is why the offline run sheet names the account. | 09-05 |
+| D23 | **A finding's `node_ids` is never returned as an answer's `highlight_path`** | The UI walks `highlight_path` hop by hop as an ordered route. A finding's `node_ids` is an unordered *set* — `[harbhajan, cdr_doc, ldh_031, jaswant, balraj, device]` is not a journey anyone can take — so returning the set as a path draws a route that does not exist, which is D3 inverted. A finding answer lights its subject only; the rest of the set is still cited and Evidence shows it. | 09-05 |
 
 ---
 
@@ -520,7 +522,9 @@ Everything is scoped to a case. There is no endpoint that reads across cases exc
 **Three things the front end should know about the shapes:**
 
 1. **`/ask` and `/brief` return §5.3 plus a `verified` block** — `{ok, dropped_nodes, dropped_edges}`. The backend has already checked every citation against the graph and stripped any that did not exist. **If `verified.ok` is false, show that** — an answer whose citations failed is not an answer, and hiding it is the one thing that would make this dishonest.
-2. **`/brief` returns deterministic findings *and* a narrative.** `findings` comes from the graph and is always present, even with no API key and no network. `narrative` is the model's version. If the model is unavailable the narrative says so in `caveats` and the findings still stand — design for that state, it is the one the demo machine may be in.
+2. **`/brief` returns deterministic findings *and* a narrative.** `findings` comes from the graph and is always present, even with no API key and no network. `narrative` is the model's version. If the model is unavailable the narrative says so in `caveats` and the findings still stand — design for that state, it is the one the demo machine may be in. **`verified` really is always present now**, including on a case with no documents, where it reports a pass with nothing in it (`ok: true`, both dropped lists empty) rather than being absent: nothing was cited because nothing has been found yet, which is not a verification failure. It was missing there until 2026-09-05, and reading it undefensively white-screened the workspace.
+
+   **With no model, `/ask` still answers a question rather than looking up a name** (D22). Two entities named returns the real path between them with `highlight_path` set, so the split screen works offline; an influence question returns the finding. Where the router cannot resolve a phrase it says so in `caveats` and names the candidates — expect and render those.
 3. **`highlight_path` is the render instruction.** It is an ordered list of node ids. Lighting exactly those, in order, is what makes the split screen the reasoning rather than a decoration (D3).
 
 ---
@@ -549,7 +553,8 @@ backend/
   agent/
     tools.py        §5.2 read tools + the act tools
     contract.py     §5.3 schema and verify() — the citation check
-    loop.py         ask / brief / investigate, tool_runner, offline fallback
+    loop.py         ask / brief / investigate, tool_runner
+    offline.py      routes a question over the graph with no model (D22)
   custody/
     chain.py        the hash chain (§5.4)
   api/
@@ -562,11 +567,13 @@ data/
   cases/            per-case stores (gitignored)
   synthetic/
     generate.py     the demo case generator + the planted ground truth
+    tamper.py       breaks/restores a synthetic case's custody chain (§9.3 live)
     out/            the generated CSVs, FIRs and GROUND_TRUTH.json
 tests/
-  test_core.py      12 tests, incl. the planted-truth assertions
+  test_core.py      35 tests, incl. the planted-truth assertions
 docs/
-  demo-script.md    NOT WRITTEN — workstream F
+  demo-script.md    the run sheet for the 8th, incl. the offline variant
+  demo-fraud-complaint.txt   the §6 crime-type-agnostic beat, uploaded live
 ```
 
 ---
@@ -585,7 +592,7 @@ pip install -r requirements.txt
 cp .env.example .env            # then put the key in .env — see §8
 
 python -m data.synthetic.generate --case demo-114   # build the demo case (§9)
-python -m pytest tests -q                           # 14 tests, all should pass
+python -m pytest tests -q                           # 35 tests, all should pass
 uvicorn backend.api.main:app --reload               # http://127.0.0.1:8000/docs
 ```
 
@@ -749,18 +756,21 @@ The failure mode of a six-person hackathon is everyone building alone until hour
 | **Front end — case workspace** | **built, exercised in a browser against `demo-114` (2026-09-05)** — all six §3.5a sections; **19 of §5.6's 22 endpoints are reached** from the UI |
 | `docs/demo-script.md` | **NOT WRITTEN** — workstream F |
 
-**Verified against the demo case**, `python -m pytest tests -q` → **25 passed**:
+**Verified against the demo case**, `python -m pytest tests -q` → **35 passed**:
 
 - The kingpin is named in **no report** — only in CDR metadata — and the system **leads with him**: *"Harbhajan Dhillon connects this network but appears in no report."* (§9.2 query 2.)
 - Ravi reaches the Delhi account **through the tower co-location**, and there is provably no call between the two numbers, so the system cannot claim contact. (§9.2 query 1.)
 - Two cases of **different kinds** (trafficking, vendor fraud) share nothing.
 - Altering one custody entry **breaks the chain at that entry**. (§9.3.)
-- A 40-page document ingests and re-runs all analytics in **well under a second**.
+- A 40-page document ingests and re-runs **all** analytics in about **1.4 seconds** on the build machine — measured 2026-09-05, not estimated. It said "well under a second" until then, which was true before the last three sources widened the recompute. The test's bar is 5s, deliberately loose: it exists to catch someone putting a model in the ingest path (D4), not to police tenths of a second.
 - A **real two-page FIR in PDF** — tables, wrapped lines, a case that continues across the page break — reaches the graph with its people, both phone numbers, the vehicle and the account, and the citation opens.
 - A **scanned PDF** returns a warning saying it could not be read, instead of registering as evidence and adding nothing.
 - A **criminal register** names Manjit Singh and Suneel Kumar as repeat offenders — three prior cases each, one conviction each — and links four pairs of people through a **shared charge sheet**, which nothing in the current case links directly.
 - A **C3-graded intelligence report** enters everything it implies at **70% confidence** and says so at upload, while the fact that it names those men stays at 100%.
 - **No source added after 09-04 crosses the Ludhiana/Delhi divide**, so the kingpin is still the only bridge and demo query 2 still works. This is asserted, not assumed.
+- **An upload over HTTP is filed under the officer's filename**, in the document list, in the citations and in the custody chain — asserted across the HTTP seam, not against `ingest_file`.
+- **With no model, both §9.2 queries still work.** Query 1 traces the real path and sets `highlight_path`; query 2 names Harbhajan Dhillon by leading with the finding rather than the raw ranking, which would name Sukhwinder Kaur.
+- **The §9.3 tamper beat can be performed and undone** — `data.synthetic.tamper` breaks entry 2, the API names it, and restore is byte-identical so the demo continues on the same case. The tool refuses any case not marked synthetic.
 
 Demo case, for scale: **125 nodes (116 entities + 9 documents), 1,148 links, 9 documents, 7 communities, 38 anomalies, 26 findings.**
 
@@ -775,19 +785,19 @@ Demo case, for scale: **125 nodes (116 entities + 9 documents), 1,148 links, 9 d
 - **The cue NER reads two intelligence frames, not every one.** "The source names X" and "X is reported to be …" are handled; a name followed by a subordinate clause before its verb is not, and that is spaCy's job (`ner_backend()` says which layers are live). Widening the regex to leap a clause is exactly the bug D15 records.
 - **Scans still are not read** — unchanged, and still §13's question.
 
-- **A live upload is filed under the server's temp filename. Found 2026-09-05 by driving the real upload through the UI; backend fix, not a front-end one.** `POST /documents` writes the upload to a `tempfile.NamedTemporaryFile` and hands that path to `ingest_file`, which takes its filename from `path.name` (`backend/ingest/pipeline.py:118`). So an officer who uploads `fir_114_003.pdf` gets a document called `tmpegm_u9dr.pdf` and a doc id of `doc:tmpegm_u9dr` — in the document list, in every citation, and in the custody chain. **The demo case does not show this**, because the generator ingests real paths; it only appears on a live upload, which is exactly what a judge asks to see. The fix is to carry `file.filename` through: `ingest_file` needs a `filename: str | None = None` parameter used in place of `path.name` for `make_doc_id` and `register_document`, and `main.py` should pass `file.filename`. Left for whoever owns `backend/` — the front end already sends the real name in the multipart part.
+**Fixed 2026-09-05 — all three defects the workspace session left open**, each verified against the running server and not only in tests:
 
-- **`/brief` omits the `verified` block on a case with no documents**, though §5.6 describes it as always present. Harmless now: the front end treats a missing block as "no verification ran" rather than "verification failed", which is the honest reading of an empty case. Worth knowing before anything else consumes `/brief`.
+- **A live upload is filed under the officer's filename again.** `ingest_file` takes a `filename` parameter and `POST /documents` passes `file.filename`, so `fir_114_003.pdf` is `doc:fir_114_003` in the document list, in every citation and in the custody chain instead of `doc:tmpegm_u9dr`. The name is basenamed on the way in, because a browser may send a path and this string is displayed and stored, not just hashed. **Guarded by a test that goes over HTTP**, not one that calls `ingest_file` — the defect was `main.py` never passing the argument, so a unit test of the function would have passed against the bug. Same shape as the bug itself: the units were all fine and the seam was not.
+- **`/brief` carries `verified` on an empty case**, reporting a pass with nothing in it (`ok: true`, both lists empty) rather than being absent. Nothing was cited because nothing has been found yet, which is not a verification failure — reporting `ok: false` would put a red "could not be verified" panel on every new case. The front end's defensive read stays correct and is now belt-and-braces.
+- **Offline `/ask` routes the question** — D22, `backend/agent/offline.py`. **Both §9.2 queries now survive a round with no key**, which is what §13's "do we present live" question was really about. See §12 for what it does and what it refuses to do.
 
-- **The offline `/ask` fallback answers names, not questions.** With no key, `Harbhajan Dhillon` returns a real cited answer, but *"How is Ravi connected to the Ludhiana account?"* returns *"Nothing in this case matches that name or identifier."* — including for demo query 1 (§9.2), phrased as a question. §7 says `/ask` "falls back to a deterministic graph answer", and for `/brief` that is true; for `/ask` it is a bare entity lookup. **If the demo runs without the key for any reason, the centrepiece question returns nothing.** The front end renders whatever comes back honestly, so this is a backend decision: either the fallback learns to route a question at `path_between` / `top_influencers`, or the demo commits to running with the key and §13's offline risk is answered.
+**Next, and it is now one item:**
 
-**Next, in order:**
+1. **The live API call, once, together, before the 8th.** Every screen that consumes it already handles both outcomes, including the model being unreachable. **This is the only unfinished thing in the repo.**
 
-1. **`docs/demo-script.md`** (workstream F). The front end can now show everything the script needs to point at, so nothing blocks this. **It is the only unbuilt item left in the whole repo.**
-2. **The live API call**, once — together, before the 8th. See above. Every screen that consumes it already handles both outcomes, including the model being unreachable.
-3. **The upload filename defect below**, which is a backend fix and is the one thing in this list a judge would see.
+Everything else still open here is a *known limit*, not a task: no OCR (§13), `search_web` is a stub, and the cue NER reads two intelligence frames rather than every one.
 
-*(The case workspace was item 1 and is done — 2026-09-05, §10.1b and §12.)*
+*(The case workspace, `docs/demo-script.md`, the upload defect, the `/brief` block and the offline fallback were all items on this list and are all done — 2026-09-05, §10.1b and §12.)*
 
 **The three §5.6 endpoints the UI does not call, and why** — none is an oversight, and each is a small job if it turns out to be wanted:
 
@@ -848,6 +858,19 @@ Append one line per session. What you built · what you changed in this file · 
   - **Verified in a real browser, not by reading the code**: the demo case end to end at 1440×900 and 820×1024, zero console errors, the scanned-PDF warning shown to the officer on a real upload, a citation opening on the exact CDR row it came from, and an empty case rendering rather than crashing. `pnpm build` and `pnpm lint` are clean and the backend's 25 tests still pass.
   - `.gitignore` gained `.gstack/` — a scratch directory the browser tooling writes into the repo root. Not project state; ignored so it cannot be committed by accident.
 
+
+- **2026-09-05, late (Kanwar + Claude)** — **the three open backend defects closed, and `docs/demo-script.md` written. The repo has one unfinished item left: the live model call.** What the next agent needs to know:
+  - **An upload is filed under the officer's filename again.** `ingest_file` takes `filename`; `main.py` passes `file.filename`; the name is basenamed because a browser may send a path. **The test goes over HTTP on purpose** — the defect was `main.py` never passing the argument, so a unit test of `ingest_file` would have passed against the bug. Mutation-checked: reverting `main.py` alone fails it with `doc:tmplsegj3yr`.
+  - **`/brief` carries `verified` on an empty case** — `contract.verified_vacuously()`, a pass with nothing in it. Not `verify()` on an empty answer, which fails by design; nothing was cited because nothing has been found, and `ok: false` would put a red panel on every new case. §5.6 note 2 updated.
+  - **Offline `/ask` routes the question — D22, new `backend/agent/offline.py`.** Two entities named gives the path between them with `highlight_path` set, so the split screen works with no key; an influence question gives the finding; a type word gives what the case holds of that kind; an unresolvable phrase gives **the candidates, named, rather than a confident guess**. §13's offline risk is now answered for both demo queries.
+  - **Two bugs the first version of that router had, both caught before they shipped and both worth not reintroducing.** A type word was constraining the *whole sentence*, so "the Ludhiana **account**" resolved *Ravi* to the Instagram handle `@ravi_ldh` and answered about a different Ravi — a type word now qualifies only the phrase beside it. And `_route_influence` answered from raw betweenness, which names **Sukhwinder Kaur** (0.380, in four documents) rather than Harbhajan Dhillon (0.222, in one) — it leads with the `hidden_broker` finding now, because the finding is what encodes *central **and** absent from every report*, and the ranking throws that away.
+  - **The influence answer claimed something about the evidence that was not read off the evidence, and driving the UI is what caught it.** It ended with *"the busiest people are … and every one of them is already named in the reports"* — listing the top three by raw centrality. **Gurpreet Singh is on that list and is in no report at all** (a CDR, the criminal register and a social export), so the answer named him one sentence after saying the man who matters is the one nobody reported. It now filters that list through the document kinds and the sentence is true by construction, guarded by `test_the_offline_influence_answer_never_calls_an_undocumented_person_documented`. Every test in this session passed while it was wrong; the browser is what showed it.
+  - **D23: a finding's `node_ids` is never returned as an answer's `highlight_path`.** The UI walks that field hop by hop as an ordered route; a finding's ids are an unordered set, so returning the set draws a journey nobody can take. Findings light their subject only.
+  - **The kingpin test was weak and the mutation check is what found it.** It asserted `"Harbhajan Dhillon" in answer` — which passed against a version that led with Sukhwinder Kaur and listed him third in a trailing "Then:". It asserts `startswith` now. **A guard that has never failed is not a guard**; all six new behaviours were mutation-checked.
+  - **`data/synthetic/tamper.py` makes the §9.3 beat performable.** There was no way to break the chain live — the UI has no tamper control, correctly. One command breaks entry 2, the API names it, `--restore` is byte-identical so the demo continues on the same case. **It refuses any case not marked `synthetic`**, and that check is not a flag.
+  - **Two claims in the repo were wrong and are corrected.** A 40-page ingest plus full recompute takes **~1.4s**, not "well under a second" — true before the last three sources widened the recompute, measured now rather than estimated. And the demo script's first draft told the presenter to point at "five direct contacts" on Harbhajan's node; **the drawer shows two `OWNS` edges to his own SIMs**, because the five is computed on the person-projected graph (D13). A number that is not on screen is a number a judge will check.
+  - **25 → 35 tests, all passing.** Frontend untouched: no contract moved.
+
 ---
 
 ## 13. Open questions
@@ -857,5 +880,5 @@ Answer these in-place when you learn the answer, and say who answered it.
 - **Who are the six team members?** Two on GitHub, Gurpartap named as a third. SIH requires six, at least one woman.
 - **Does the internal round score prototype, presentation, or both?** The PEC circular does not say. Changes how hours 20–24 are spent.
 - **Is there a submission artefact besides the demo** — idea PPT, doc, video? The national round wants an idea presentation; the internal round's requirement is unconfirmed.
-- **Do we present live or pre-record?** Online mode; unconfirmed. If live, network failure is a real risk and the demo must run fully offline.
+- **Do we present live or pre-record?** Online mode; unconfirmed. **The offline half of this is answered as of 2026-09-05:** the demo runs fully offline, including both §9.2 queries, the upload, the custody beat and the isolation beat — `docs/demo-script.md` has the offline variant and it is not a degraded one. What is still open is the round's own format, which is a question for Dr. Kanu Goel and not for the code.
 - **Are scanned documents in scope?** Real FIRs are often photographs of paper, which have no text layer at all. As of 2026-09-05 the system detects them and says so (D18) but cannot read them; reading them means OCR, which is a dependency nobody has agreed to and which would put a lossy step in front of the graph. **Kanwar's call, not an agent's.**

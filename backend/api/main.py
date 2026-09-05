@@ -185,8 +185,10 @@ async def upload_document(
             shutil.copyfileobj(file.file, tmp)
             tmp_path = Path(tmp.name)
         try:
+            # The officer's name for the file, not the tempfile's: it becomes
+            # the doc id, every citation label and the custody reference.
             result = ingest_file(store, chain, tmp_path, kind=kind, actor=actor,
-                                 doc_id=None)
+                                 doc_id=None, filename=file.filename)
         except ValueError as exc:
             raise HTTPException(415, str(exc)) from exc
         finally:

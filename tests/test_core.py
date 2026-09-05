@@ -16,6 +16,9 @@ from pathlib import Path
 
 import pytest
 
+from backend.agent import offline
+from backend.agent.contract import verify
+from backend.agent.loop import AgentUnavailable, CaseAgent
 from backend.agent.tools import CaseContext, find_entity, path_between, read_source_doc
 from backend.analytics.metrics import recompute, top_influencers
 from backend.case import create_case, list_cases
@@ -275,6 +278,66 @@ def test_a_scanned_pdf_says_so_instead_of_ingesting_nothing_in_silence(blank_cas
     assert result.entities == []
     assert chain.verify()["valid"], "the upload is still a custody event"
     assert store.document(result.doc_id) is not None, "the document must still exist"
+
+
+# --------------------------------------------------------- upload over HTTP
+
+def test_an_upload_is_filed_under_the_officers_filename_not_the_servers_tempfile():
+    """Found by driving the real UI, not by reading the code: 25 tests and a
+    125-node demo case all passed while this was broken, because the generator
+    ingests real paths and only a live upload goes through a tempfile.
+
+    `POST /documents` writes the upload to a NamedTemporaryFile and hands that
+    path to `ingest_file`, which took the name from `path.name`. So an officer
+    who uploaded `fir_114_003.pdf` got `doc:tmpegm_u9dr` in the document list,
+    on every citation, and in the hash-chained custody log — asked to trust
+    evidence filed under a name nobody recognises.
+
+    This has to cross the HTTP seam. `ingest_file(filename=...)` passing on its
+    own would not have caught it: the defect was `main.py` never passing it.
+    """
+    from fastapi.testclient import TestClient
+
+    from backend.api.main import app
+
+    case = "test-upload-name"
+    shutil.rmtree(case_dir(case), ignore_errors=True)
+    create_case(case, title="upload", exist_ok=True)
+    try:
+        client = TestClient(app)
+        payload = (FIXTURES / "fir-114-text.pdf").read_bytes()
+        r = client.post(
+            f"/api/cases/{case}/documents",
+            files={"file": ("fir_114_003.pdf", payload, "application/pdf")},
+        )
+        assert r.status_code == 200, r.text
+        doc_id = r.json()["document"]["doc_id"]
+        assert doc_id == "doc:fir_114_003", f"filed as {doc_id}"
+
+        listed = client.get(f"/api/cases/{case}/documents").json()
+        assert [d["filename"] for d in listed] == ["fir_114_003.pdf"]
+
+        # The custody log is the one record that cannot be corrected later, so
+        # the name has to be right in it at the moment of writing.
+        custody = client.get(f"/api/cases/{case}/custody").json()
+        refs = [e["ref"] for e in custody["entries"]]
+        assert doc_id in refs, refs
+        assert not any("tmp" in str(ref) for ref in refs), refs
+
+        # A browser may send a path rather than a bare name, and this string is
+        # displayed and stored. Take the basename; never a directory component.
+        r2 = client.post(
+            f"/api/cases/{case}/documents",
+            files={"file": ("../../statement_2.txt",
+                            b"Accused Manjit Singh, mob 9915566772.", "text/plain")},
+        )
+        assert r2.status_code == 200, r2.text
+        assert r2.json()["document"]["doc_id"] == "doc:statement_2"
+        names = [d["filename"] for d in client.get(f"/api/cases/{case}/documents").json()]
+        assert "statement_2.txt" in names, names
+        assert not any(".." in n for n in names), names
+    finally:
+        shutil.rmtree(case_dir(case), ignore_errors=True)
 
 
 # ------------------------------------------------------------------- speed
@@ -565,3 +628,228 @@ def test_every_source_the_problem_statement_names_has_a_handler(demo):
     kinds = {d["kind"] for d in store.documents()}
     assert {"fir", "cdr", "financial", "surveillance", "social", "history",
             "intelligence"} <= kinds, f"missing: {kinds}"
+
+
+# --------------------------------------- the demo with no key (D11, §9.2, §13)
+
+def test_the_offline_fallback_answers_a_question_not_just_a_name(demo):
+    """§9.2 demo query 1, asked the way a person asks it, with no model.
+
+    The old fallback handed the whole sentence to `find_entity`, which is a
+    substring match on labels, so anything phrased as a question matched nothing
+    and returned "Nothing in this case matches that name or identifier." If the
+    round runs without the key — §13 says nobody knows yet whether it will —
+    that was the centrepiece question returning nothing on stage.
+    """
+    store, _ = demo
+    ctx = CaseContext(store, CustodyChain(DEMO))
+    answer = offline.answer(
+        ctx, "How is Ravi Kumar connected to account 50100244178?", "no key")
+
+    assert "50100244178" in answer["answer"]
+    assert "Ravi Kumar" in answer["answer"]
+    # The path is what lights the graph (D3). An answer about a connection that
+    # cannot show the connection is the theatre D3 exists to prevent.
+    assert len(answer["highlight_path"]) >= 2
+    assert answer["highlight_path"][0] == "person:ravi_kumar"
+    assert answer["highlight_path"][-1] == "account:50100244178"
+    assert answer["cited_edges"], "a path with no edges cited"
+
+    # Every id must survive verification, or the front end shows it as failed.
+    checked = verify(dict(answer), store)
+    assert checked["verified"]["ok"], checked["verified"]
+
+
+def test_the_offline_fallback_names_the_kingpin_and_not_the_busiest_person(demo):
+    """§9.2 demo query 2 offline — and the trap inside it.
+
+    Raw betweenness ranks Sukhwinder Kaur first; she is named in four documents
+    and is not news. The man the room is meant to see is fifth on that ranking
+    and appears in no report at all, which is what `hidden_broker` encodes.
+    Answering from the ranking would name the wrong person on stage.
+    """
+    store, _ = demo
+    ctx = CaseContext(store, CustodyChain(DEMO))
+    answer = offline.answer(ctx, "Who matters most in this case?", "no key")
+
+    # He must be what the answer *leads with*, not a name somewhere in it. The
+    # first version of this test asserted only that the string appeared, and it
+    # passed against a version that led with Sukhwinder Kaur and listed him
+    # third — which on stage is naming the wrong man and getting a tick for it.
+    assert answer["answer"].startswith("Harbhajan Dhillon"), answer["answer"][:120]
+    assert answer["highlight_path"] == ["person:harbhajan_dhillon"],         answer["highlight_path"]
+    # An /ask answer's highlight_path is an ordered route the UI walks hop by
+    # hop. A finding's node_ids is an unordered set, so handing the whole set
+    # over would draw a journey through a document and a handset that nobody
+    # can take. The subject alone, or a real path — never a set dressed as one.
+    top = top_influencers(store, "betweenness", limit=1)[0]["label"]
+    assert top != "Harbhajan Dhillon", \
+        "the demo no longer has a kingpin below the top of the raw ranking — " \
+        "this test is asserting nothing"
+    assert verify(dict(answer), store)["verified"]["ok"]
+
+
+def test_the_offline_fallback_says_what_it_could_not_resolve(demo):
+    """It must not quietly pick one of three candidates and present the result
+    as the answer — that is the well-formed-and-wrong failure this system is
+    built against. "Ludhiana" is three different nodes here."""
+    store, _ = demo
+    ctx = CaseContext(store, CustodyChain(DEMO))
+    hits = offline.mentions(ctx, "How is Ravi connected to the Ludhiana account?")
+    by_phrase = {h["phrase"]: h for h in hits}
+
+    assert "ravi" in by_phrase, hits
+    # A type word qualifies the phrase beside it, never the whole sentence.
+    # Applied sentence-wide, "account" resolved Ravi to the handle @ravi_ldh.
+    assert by_phrase["ravi"]["id"] == "person:ravi_kumar", by_phrase["ravi"]
+    assert len(by_phrase["ludhiana"]["candidates"]) > 1
+
+    answer = offline.answer(ctx, "How is Ravi connected to the Ludhiana account?", "no key")
+    assert any("could be" in c for c in answer["caveats"]), answer["caveats"]
+
+
+def test_a_sentence_naming_nothing_does_not_get_an_invented_answer(demo):
+    store, _ = demo
+    ctx = CaseContext(store, CustodyChain(DEMO))
+    answer = offline.answer(ctx, "What is the weather in Paris", "no key")
+    assert "could not identify" in answer["answer"]
+    assert "not an answer to your question" in answer["answer"]
+
+
+def test_brief_on_an_empty_case_carries_the_verified_block_5_6_promises():
+    """§5.6 describes `verified` as always present. `/brief` omitted it on a
+    case with no documents, so the front end had to read a documented field
+    defensively — and reading it undefensively white-screened the workspace.
+
+    It must be present *and* it must not read as a failure: an empty case has
+    nothing to cite, which is a pass with nothing in it. Reporting `ok: false`
+    would put a red "could not be verified" panel on every new case.
+    """
+    case = "test-empty-brief"
+    shutil.rmtree(case_dir(case), ignore_errors=True)
+    create_case(case, title="empty", exist_ok=True)
+    try:
+        store = CaseStore(case)
+        agent = CaseAgent(CaseContext(store, CustodyChain(case)))
+        narrative = agent.brief()["narrative"]
+        assert "verified" in narrative, "§5.6 says this block is always present"
+        assert narrative["verified"]["ok"] is True
+        assert narrative["verified"]["dropped_nodes"] == []
+        assert narrative["verified"]["dropped_edges"] == []
+        store.close()
+    finally:
+        shutil.rmtree(case_dir(case), ignore_errors=True)
+
+
+def test_ask_itself_routes_the_question_when_the_model_is_unavailable():
+    """The seam, not the unit. `offline.answer` passing on its own proves
+    nothing about whether `ask()` reaches it — that is the same mistake the
+    upload-filename defect was, where every unit worked and the wiring did not.
+
+    `_run` is forced to fail rather than left to fail: on a machine that does
+    have the key this test would otherwise spend it, and README §11 says the
+    live call is run once, deliberately, and not by a test suite.
+    """
+    case = "test-offline-ask"
+    shutil.rmtree(case_dir(case), ignore_errors=True)
+    create_case(case, title="offline", case_type="fraud", exist_ok=True)
+    try:
+        store, chain = CaseStore(case), CustodyChain(case)
+        ingest_text(
+            store, chain,
+            "Complainant Ravi Kumar (mob. 9876543210) stated that accused Manjit Singh "
+            "called him from 9814227731 and demanded payment.",
+            filename="statement.txt",
+        )
+        recompute(store)
+
+        agent = CaseAgent(CaseContext(store, chain))
+
+        def unavailable(_prompt):
+            raise AgentUnavailable("forced offline for this test")
+
+        agent._run = unavailable
+        answer = agent.ask("How is Ravi Kumar connected to Manjit Singh?")
+
+        assert "Nothing in this case matches" not in answer["answer"], \
+            "ask() is still falling back to the name lookup"
+        assert "Ravi Kumar" in answer["answer"] and "Manjit Singh" in answer["answer"]
+        assert answer["highlight_path"], "a connection answer that lights nothing"
+        assert answer["verified"]["ok"], answer["verified"]
+        assert chain.verify()["valid"]
+        store.close()
+    finally:
+        shutil.rmtree(case_dir(case), ignore_errors=True)
+
+
+# ------------------------------------------- the §9.3 tamper beat, performable
+
+def test_the_tamper_tool_refuses_a_case_that_is_not_synthetic():
+    """It damages a custody chain on purpose, so the only thing between it and a
+    real case file is this check. It is not a flag and must not become one."""
+    from data.synthetic.tamper import NotSynthetic, break_chain
+
+    case = "test-not-synthetic"
+    shutil.rmtree(case_dir(case), ignore_errors=True)
+    create_case(case, title="real", exist_ok=True)   # synthetic defaults to False
+    try:
+        with pytest.raises(NotSynthetic):
+            break_chain(case)
+        with pytest.raises(NotSynthetic):
+            break_chain("no-such-case-at-all")
+        # and it did not touch the chain on the way to refusing
+        assert CustodyChain(case).verify()["valid"] is True
+    finally:
+        shutil.rmtree(case_dir(case), ignore_errors=True)
+
+
+def test_the_tamper_tool_breaks_the_named_entry_and_restores_it(demo):
+    """§9.3 is a live beat: break the chain in front of the room, show the
+    system name the exact entry, put it back. Restoring must be lossless — the
+    demo continues on this case immediately afterwards."""
+    from data.synthetic import tamper
+
+    _, _result = demo
+    chain = CustodyChain(DEMO)
+    before = chain.path.read_text(encoding="utf-8")
+    assert chain.verify()["valid"] is True
+
+    try:
+        broken = tamper.break_chain(DEMO, entry=2)
+        assert broken["valid"] is False
+        assert broken["broken_at"] == 2
+        assert broken["entry"]["ref"] == "doc:forged"
+    finally:
+        restored = tamper.restore(DEMO)
+
+    assert restored["valid"] is True
+    assert chain.path.read_text(encoding="utf-8") == before, \
+        "restore is not byte-identical — the demo cannot continue on this case"
+
+
+def test_the_offline_influence_answer_never_calls_an_undocumented_person_documented(demo):
+    """The answer says the busiest people are "already in the reports". That is
+    a claim about the evidence, so it has to be read off the evidence.
+
+    It was not: the first version listed the top three by raw centrality, and
+    **Gurpreet Singh is third-highest among the non-subjects and is in no report
+    at all** — CDR, criminal register and a social export only. The answer named
+    him one sentence after saying the man who matters is the one in no report.
+    """
+    store, _ = demo
+    ctx = CaseContext(store, CustodyChain(DEMO))
+    answer = offline.answer(ctx, "Who matters most in this case?", "no key")
+
+    ranked = top_influencers(store, "betweenness", limit=5)
+    undocumented = [r for r in ranked if not offline._in_a_report(ctx, r["node_id"])]
+    assert undocumented, "no undocumented person in the top 5 — this test asserts nothing"
+
+    subject = set(
+        (store.get_analytics("findings") or {})["value"][0].get("node_ids") or []
+    )
+    for r in undocumented:
+        if r["node_id"] in subject:
+            continue   # the finding's own subject is named on purpose
+        assert r["label"] not in answer["answer"], (
+            f"{r['label']} is in no report and the answer lists them as documented"
+        )

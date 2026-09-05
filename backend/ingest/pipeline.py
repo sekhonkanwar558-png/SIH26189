@@ -111,11 +111,24 @@ def ingest_file(
     kind: str | None = None,
     actor: str = "system",
     doc_id: str | None = None,
+    filename: str | None = None,
 ) -> IngestResult:
-    """Read a file off disk, copy it into the case, and fold it into the graph."""
+    """Read a file off disk, copy it into the case, and fold it into the graph.
+
+    `filename` is what the document is *called*, which is not the same thing as
+    where its bytes happen to sit while we read them. An HTTP upload lands in a
+    `tempfile`, so `path.name` there is `tmpegm_u9dr.pdf`, and that name would
+    otherwise become the doc id, the entry in the document list, the label on
+    every citation, and the reference in the hash-chained custody log. An
+    officer would be shown evidence filed under a name nobody recognises.
+    Defaults to `path.name`, which is correct for a real path on disk.
+    """
     path = Path(path)
+    # `.name` on the way in as well: a browser may send a path rather than a
+    # bare name, and this string is displayed and stored, not just hashed.
+    display = Path(filename or path.name).name or path.name
     read = read_document(path, kind=kind)
-    doc_id = doc_id or make_doc_id(store, path.name, read.sha256)
+    doc_id = doc_id or make_doc_id(store, display, read.sha256)
 
     # The original is kept inside the case directory: §5.5 `docs/`, so a
     # citation can be traced to the bytes that were uploaded, not just to text.
@@ -124,7 +137,7 @@ def ingest_file(
     if path.resolve() != kept.resolve():
         shutil.copy2(path, kept)
 
-    return ingest_read(store, chain, read, doc_id=doc_id, filename=path.name, actor=actor)
+    return ingest_read(store, chain, read, doc_id=doc_id, filename=display, actor=actor)
 
 
 def ingest_text(
