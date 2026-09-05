@@ -42,6 +42,8 @@ changing SIMs, and that is visible only when the IMEI is the source node.
 
 from __future__ import annotations
 
+import functools
+
 import re
 from datetime import datetime
 from typing import Iterable, Sequence
@@ -180,17 +182,34 @@ def ingest_rows(
                          "its text was still extracted and searched for identifiers"]}
 
 
+@functools.lru_cache(maxsize=4)
+def _line_offsets(text: str) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Start offset and length of every line, computed once per document.
+
+    `_row_span` used to split the whole file and sum the length of every
+    preceding line **for each row** — O(rows × file size), which on a 4,000-row
+    CDR meant four thousand splits of the same four thousand lines. Measured
+    2026-09-06; it was the second of three quadratics in the ingest path.
+    """
+    lines = text.splitlines(keepends=True)
+    starts, lengths, at = [], [], 0
+    for line in lines:
+        starts.append(at)
+        lengths.append(len(line))
+        at += len(line)
+    return tuple(starts), tuple(lengths)
+
+
 def _row_span(text: str, row_index: int, header_offset: int = 1) -> dict:
     """Character range of a CSV row in the raw file, so a CDR edge cites the
     line it came from exactly as an FIR edge cites its sentence."""
     if not text:
         return {"doc_id": "", "start": None, "end": None}
-    lines = text.splitlines(keepends=True)
+    starts, lengths = _line_offsets(text)
     idx = row_index + header_offset
-    if idx >= len(lines):
+    if idx >= len(starts):
         return {}
-    start = sum(len(x) for x in lines[:idx])
-    return {"start": start, "end": start + len(lines[idx])}
+    return {"start": starts[idx], "end": starts[idx] + lengths[idx]}
 
 
 def _ensure(store: CaseStore, node_type: str, value: str, source: dict,

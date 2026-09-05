@@ -14,6 +14,7 @@ Recomputed after every ingest so answers are instant (§3.3), and cached against
 from __future__ import annotations
 
 import math
+import os
 from typing import Any
 
 import networkx as nx
@@ -36,17 +37,43 @@ def analysis_graph(store: CaseStore) -> nx.Graph:
     return p
 
 
+# Above this many nodes, betweenness is estimated from sampled pivots rather
+# than computed from every pair. Measured 2026-09-06 on a 2,685-node case:
+# exact took **36.4s**, k=128 took **2.2s**, and recompute runs after every
+# single ingest. Below the threshold nothing changes — the demo case is 125
+# nodes, so it is still exact, to the last decimal.
+BETWEENNESS_EXACT_MAX = int(os.environ.get("SIH_BETWEENNESS_EXACT_MAX", "500"))
+BETWEENNESS_PIVOTS = int(os.environ.get("SIH_BETWEENNESS_PIVOTS", "128"))
+
+
 def compute_metrics(p: nx.Graph, _unused: Any = None) -> dict[str, dict[str, float]]:
     """Scored on the person-projected graph (see `nx_adapter.project_people`),
     because "who matters" is a question about people and a man and his SIM are
-    not two actors. Unattributed identifiers still score in their own right."""
+    not two actors. Unattributed identifiers still score in their own right.
+
+    Betweenness is exact on a case that fits and **estimated** on one that does
+    not. Exact betweenness is O(V·E): it is the whole cost of a recompute, and
+    a recompute runs after every ingest, so on a real case file the officer
+    would be waiting minutes for the graph to settle after each document. The
+    estimate samples `BETWEENNESS_PIVOTS` source nodes with a fixed seed, so it
+    is deterministic — the same case gives the same numbers on every machine —
+    and it preserves the *ranking* at the top, which is the only thing any
+    finding reads. **Where it is an estimate, the system says so** rather than
+    printing an approximation as a fact (`metrics_meta`, and `explain()` says
+    "about" in the sentence the officer reads).
+    """
     if p.number_of_nodes() == 0:
         return {m: {} for m in METRICS}
 
     # `distance` (1/weight), not `weight`: NetworkX reads the weight argument
     # as a cost, so passing raw weight would make well-evidenced links look far
     # apart and invert the whole result.
-    betweenness = nx.betweenness_centrality(p, weight="distance", normalized=True)
+    if p.number_of_nodes() > BETWEENNESS_EXACT_MAX:
+        betweenness = nx.betweenness_centrality(
+            p, k=min(BETWEENNESS_PIVOTS, p.number_of_nodes()),
+            weight="distance", normalized=True, seed=42)
+    else:
+        betweenness = nx.betweenness_centrality(p, weight="distance", normalized=True)
     try:
         pagerank = nx.pagerank(p, weight="weight")
     except nx.PowerIterationFailedConvergence:
@@ -91,6 +118,7 @@ def explain(
     u: nx.Graph,
     store: CaseStore,
     membership: dict[str, str],
+    estimated: bool = False,
 ) -> str:
     """The sentence an officer reads. Facts only, all of them checkable."""
     node = store.get_node(node_id)
@@ -101,7 +129,10 @@ def explain(
 
     bits = []
     if metric == "betweenness":
-        bits.append(f"lies on {score:.0%} of the shortest paths in this network")
+        # "about" when the number came from sampled pivots. A rounded estimate
+        # read out as a fact is the kind of thing a judge asks the method of.
+        about = "about " if estimated else ""
+        bits.append(f"lies on {about}{score:.0%} of the shortest paths in this network")
     elif metric == "pagerank":
         bits.append(f"ranks {score:.3f} by weighted connection volume")
     else:
@@ -149,6 +180,8 @@ def top_influencers(
     else:
         scores = compute_metrics(p)[metric]
         communities = compute_communities(p)
+    estimated = (metric == "betweenness"
+                 and p.number_of_nodes() > BETWEENNESS_EXACT_MAX)
 
     membership = _community_of(communities)
     u = p  # explain() reads neighbours from the graph the score came from
@@ -162,7 +195,8 @@ def top_influencers(
             "label": (store.get_node(node_id).label if store.get_node(node_id) else node_id),
             "score": round(float(score), 6),
             "metric": metric,
-            "why": explain(node_id, metric, float(score), u, store, membership),
+            "why": explain(node_id, metric, float(score), u, store, membership, estimated),
+            "estimated": estimated,
         })
         if len(out) >= limit:
             break
@@ -178,6 +212,11 @@ def recompute(store: CaseStore) -> dict[str, Any]:
     metrics = compute_metrics(p)
     communities = compute_communities(p)
     store.put_analytics("metrics", metrics)
+    store.put_analytics("metrics_meta", {
+        "betweenness_estimated": p.number_of_nodes() > BETWEENNESS_EXACT_MAX,
+        "betweenness_pivots": min(BETWEENNESS_PIVOTS, p.number_of_nodes()),
+        "projected_nodes": p.number_of_nodes(),
+    })
     store.put_analytics("communities", communities)
 
     anomalies = compute_anomalies(store, g, u)

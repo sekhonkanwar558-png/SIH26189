@@ -191,12 +191,14 @@ built follows the idiom and carries none of the marks.
 
 ### What this supersedes
 
-- **§3.5a (Jashan's design specification) is retired as the interface spec.** The
+- **The old design specification is deleted, not archived.** It was §3.5a: the
   Calm Civic Forensic palette, the 60/40 split, the six named workspace sections
-  and the labelled tablet drawer describe a product that no longer exists. Kept
-  in place only as the record of what was built and why it changed.
+  and the labelled tablet drawer. All of it described a product that no longer
+  exists, and a dead spec in a file four agents read is something one of them
+  will eventually build to. **§3.5 now describes the interface that is actually
+  there.**
 - **D14, D16, D17 are superseded** by D24–D26 — see the notes on those rows.
-- **§10.1a and §10.1b (who owns the front end) no longer describe reality.**
+- **§10.1a and §10.1b (who owns the front end) are replaced by one section.**
   Kanwar took the interface, then changed it. **Jashan: nothing you built is
   being criticised — the product moved under it.**
 - **`docs/demo-script.md`'s offline variant is deleted**, and so is its
@@ -306,6 +308,31 @@ This is a correctness property in the real domain (evidence from one investigati
 
 ---
 
+### 2.5 It is not a chat with a context window — 2026-09-06
+
+**This is the distinction the whole product rests on, and it is the one a judge is most likely to test.** Kanwar, 2026-09-06, in his own words:
+
+> *"one thing we doing different from a simple chat interface with some token context window is that we are proving everyone a brain of their own in each case with graphs and loops which keeps on developing as person interacts and gives more documents so we cant at all work as a one chat as context window, we are just a bot doing calls based on brain and graph of case so its nothing like context window anywheree its personal bot for each case working case's brainn."*
+
+**The mechanism, stated plainly.** A chat assistant holds the case in its context window: the documents are pasted in, the window fills, and what falls out of it is gone. This one holds nothing. **Every case has a brain on disk** — a graph, its analytics, its memory, its custody chain — and the assistant is a **bot making calls against that brain**. It arrives at each turn knowing nothing and asks the case, with tools, in a loop.
+
+**Three things follow, and each one is checkable:**
+
+1. **The brain grows; a window only fills up.** Every document an officer hands over widens the graph permanently, and every analytic re-runs across the whole case. Document forty is not competing for room with document one — it is making document one worth more, because a link needs both ends. *(This is the opposite of a context window, where the fortieth document is what pushes the first one out.)*
+2. **The brain outlives the conversation.** Clear the thread and ask again: the same answer comes back, cited to the same nodes. Nothing the officer said is load-bearing; the graph is. **This is the cheapest demonstration of the whole claim and it takes ten seconds** — see `docs/demo-script.md`.
+3. **The brain is per case, and it is his.** Not a tenant, not a filter over a shared store — a different file (§2.4). Two officers, two cases, two brains, and no query exists that could reach across.
+
+**What that demands of the interface (D29).** If the brain is the product, the interface has to make it visible without becoming a dashboard again:
+
+- **What the brain holds is on screen at all times** — entities, links, documents — as one quiet line, never a panel. It is the only number in the product, and it is there because it *changes*.
+- **When it grows, it says what grew.** A document that adds 37 entities and 214 links says so, in that moment, next to the conversation. That single sentence is the difference between "it uploaded" and "it learned something".
+- **The graph is the brain, not an illustration of an answer.** It opens by itself when an answer has a route through it, and the officer can open it whenever he wants to look — that is the "option to graph" the pivot kept (§0.5, #12).
+- **What it has worked out is part of the brain, not part of the thread.** Conclusions recorded and questions held open belong to the case and survive the conversation being cleared, so they are shown with the brain and never as chat scrollback.
+
+**What it does not mean.** It is not a licence to add panels back. Everything above is one line of text, one panel that already existed, and no new place to navigate to. The conversation stays the only way in (D26).
+
+---
+
 ## 3. Architecture
 
 Five pieces. Each maps to bullets in §1.1.
@@ -337,8 +364,10 @@ Five pieces. Each maps to bullets in §1.1.
                                          │ answer + cited ids + path
                                          ▼
                         ┌──────────────────────────────────────┐
-                        │  5. SPLIT-SCREEN UI                  │
-                        │  chat ◀──▶ live graph (path lights)  │
+                        │  5. ONE CHAT  (shikonye)             │
+                        │  conversation ◀─▶ the case's brain   │
+                        │  the graph opens when there is a     │
+                        │  route to light                      │
                         └──────────────────────────────────────┘
 
    every ingest and every answer ──▶  6. HASH-CHAINED CUSTODY LOG (per case)
@@ -399,31 +428,22 @@ The agent reads source documents only through `read_source_doc`, to verify an ed
 
 Model: `claude-sonnet-5`, adaptive thinking. Overridable via `ANTHROPIC_MODEL`.
 
-### 3.5 Split-screen UI
+### 3.5 The interface — one chat, and the graph when there is a route
 
-**This section is Jashan's, and it is the only part of §3 that is.** What follows is the one *behavioural* requirement the architecture places on the front end. Everything else — layout, library, look, motion, the lot — is his call (§10.1a, D14).
+**This describes what is built.** It replaced a six-section workspace on the night of 2026-09-05; §0.5 is why, and D24–D28 are the decisions. Anything in this repo that still describes panels, tabs, a section rail or a second product name is stale — delete it, do not build to it.
 
-**The requirement:** when the agent answers, **the exact path it used lights up**. `highlight_path` in the answer contract (§5.3) is an ordered list of node ids, and rendering exactly those is what makes the split screen *the reasoning* rather than a picture next to some text. A judge will probe this (D3). Everything else about how the graph is drawn is a design decision.
+**The shape.** A case rail on the left, a single conversation in a centred column, and the graph on the right **only when an answer has a route to show**. Nothing else is on screen. The officer types a sentence; that is the entire interaction vocabulary (D26). There is no landing page, no case form, no settings screen and no login: `/` is the same screen with no case open.
 
-Beyond that: a citation must click through to the source text (`GET /source`, §5.6), and a node must open its profile (`GET /nodes/{id}` returns attributes, edges, neighbours and every document it was extracted from). Both endpoints exist and return real data now.
+**The one behavioural requirement the architecture places on the interface:** when the agent answers, **the exact path it used lights up**. `highlight_path` (§5.3) is an ordered list of node ids, and rendering exactly those — hop by hop, with the real edge between each pair — is what makes the split screen *the reasoning* rather than a picture beside some text. A judge will probe this (D3). **Nothing is ever drawn between two nodes with no edge between them.**
 
-Chat-left / graph-right and Cytoscape.js were the original sketch. **They are a suggestion, not a decision** — they are not in §4 and nothing in the backend depends on either.
+**Beyond that:** a citation must click through to the source text (`GET /source`), and a node must open its profile (`GET /nodes/{id}` — attributes, edges, neighbours, and every document it was extracted from). Both endpoints exist and return real data.
 
-### 3.5a Frontend design specification — decided by Jashan, 2026-09-05
+**The visual language (D28).** Near-colourless on purpose: a white ground, one ink `#0d0d0d`, two greys, `#ececef` hairlines, `#f4f4f5` for a raised surface. **Evidence Amber `#b8791f` is the only saturated colour in the product and it means exactly one thing — this is what the answer rests on.** Danger red is the second exception and it means a verification failed. An officer reads text here for an hour; every accent that is not carrying meaning is competing with the words.
 
-The frontend is deliberately calm, light and explicit because investigating officers may not be technical users. It must never look like a dark "hacker" dashboard. Product name: **CaseLens**. Tagline: **"See every connection."** The assistant name is exactly **`shikonye`**, lowercase everywhere, with no avatar or logo.
+Inter, bundled locally. 15px body at `leading-7`, 13px for anything secondary. Rounded corners, no ornament, no shadow beyond the composer's hairline lift. **Light only** — an officer's tool should not read as a hacker console.
 
-**Visual foundation:** `#F7F8FA` page, white panels, `#20252B` primary text, `#245B8A` Civic Blue actions, `#C58B2A` Evidence Amber paths and citations, thin light-grey borders, almost no shadow, 10px panel corners, 12px chat bubbles, Inter bundled locally, 16px body text and 14px metadata. Status never relies on colour alone. There is no dark theme.
+**The idiom is ChatGPT's, and the word "copy" in his instruction means the idiom** (§0.5, #17–20): a centred column, a rounded composer with attach and send, a quiet conversation rail, generous whitespace, actions that appear on hover rather than sitting on screen. It does **not** mean their branding, wordmark, logo or assets, none of which are ours to ship, and none of which are in this repo.
 
-**Navigation and cases:** labelled white left sidebar, 240px expanded / 72px collapsed, pale-blue selected item, officer identity at the bottom. The case list opens directly and uses searchable detailed list cards ordered by recent activity, simple Status and Case Type filters, a blue **New Case** button, and a collapsed Closed Cases section. New Case is a short centred form; the technical case id is generated and hidden. Edit, Close and Delete live in a three-dot menu; deletion requires typing the case title.
-
-**Case workspace:** labelled case navigation is `shikonye`, Documents, Connections, Findings, Memory, Custody. The default workspace is 60% `shikonye` / 40% Connections with a draggable divider; the assistant may resize from 40% to 75%. Either panel can enter Focus mode. Tablet uses one-at-a-time `shikonye` and Connections tabs.
-
-**Assistant:** a normal WhatsApp/ChatGPT-style continuous conversation with date separators and recent messages first. Both sides use white bubbles distinguished by alignment, borders and sender labels. The composer has no prompt suggestions: only text, document attachment and visible Send. Enter sends, Shift+Enter adds a line, and the input grows to six lines. Attachments show filename, size, detected type, Change Type, Remove and independent progress. Answers expose Copy, View Evidence and Show Path; citations expand under Evidence used. Confidence is High / Medium / Low, never an invented percentage. An unverified answer is hidden behind a clear warning and Retry. `search_web` requires approval for every exact query and reason; results are labelled Web Evidence and never receive case documents.
-
-**Connections:** Cytoscape.js on a white faint-dot canvas, community-grouped force layout, circular icon nodes with soft semantic type tints and three meaningful size levels. Ordinary links are thin light-grey curves; inferred links are dashed. Selecting a result draws `highlight_path` step by step in Evidence Amber and fades unrelated entities; Clear Path remains visible. The toolbar is labelled Search, Filter, Fit, Reset and Legend. Search is always visible. Node details use a right drawer; relationship details use a compact popover. Manual positions and filters are remembered per case on the current device.
-
-**Operational states:** English only; dates use `05 Sep 2026, 14:30`; Indian currency grouping; sensitive phones and accounts are masked until Reveal. Loading uses skeletons plus status text. Errors state what happened and how to recover. Success uses a four-second lower-right toast. Keyboard focus is a 2px Civic Blue ring. Local accessibility settings cover text size, increased light-mode contrast and reduced motion. Fonts, icons and core assets are bundled, so everything except approved web search and live model narration can run with the local backend.
 
 ### 3.6 Hash-chained custody log
 
@@ -437,14 +457,14 @@ In the real domain this matters because evidence handling has to be auditable; i
 
 Follow this when you're unsure how your piece connects to the rest.
 
-1. Officer opens **Case #114**. Empty workspace, empty graph, fresh custody chain.
+1. Officer opens **Case #114**. An empty conversation, an empty graph, a fresh custody chain.
 2. Uploads three FIR PDFs, a CDR export for two numbers, one bank statement.
 3. **Ingest** pulls text, regex takes the identifiers, NER takes the names — every extraction carrying its document and offsets.
 4. **Graph** builds: entities deduped into nodes, CDR rows into `CALLED` edges, transactions into `TRANSFERRED_TO`, same-document mentions into `CO_OCCURS`.
 5. **Analytics** run on write. Betweenness, PageRank, communities, temporal spikes — all cached.
 6. Officer asks: **"How is Ravi connected to the Ludhiana account?"**
 7. **Agent** calls `path_between("person:ravi", "account:...")`. Graph returns `Ravi → phone 98xxx → tower co-location 3 Aug 22:10 → Suneel → account`. Agent calls `read_source_doc` on the two edges sourced from FIRs to verify them. Writes one sentence, returns cited node and edge IDs plus `highlight_path`.
-8. **UI** animates exactly that path on the right. Citations on the left click through to the FIR page they came from.
+8. **The chat** shows the answer; the brain opens on the right and lights exactly that path, hop by hop. *Rests on 5 entities* under the answer opens the trail, and one click on an entity opens the line of the FIR it was read out of.
 9. **Custody log** records the question, the tools called, and the answer, hash-linked.
 
 ### 3.8 The part that makes it an assistant and not a search box
@@ -477,6 +497,34 @@ What makes a case specific is `case_type` and `brief` on the case itself (`backe
 
 ---
 
+### 3.10 Huge documents, and the context that must not grow with them
+
+**Read this before you add a tool, a metric or an ingest step.** Everything here was measured on 2026-09-06, on a case built from a 2,000-row CDR and 106 KB of prose — *small*, next to a real case file — and every number below is from that machine, not an estimate.
+
+**The claim in §2.5 is only true if it is true at size.** A per-case brain that the assistant queries with tools is not a context window — but that stops being a distinction the moment the tool *results* grow with the case, because then the case is back inside the prompt and the thing degrades into exactly the chatbot we say it is not: slower and more expensive with every document, until it stops answering.
+
+Four things were wrong, and each one had the same shape — fine on the demo case, fatal on a real one.
+
+**1. Ingest was quadratic, three times over.** 27 KB of prose took 5s, 53 KB took 16s, 106 KB took **63s**; a 1 MB chargesheet bundle would not have finished. Every one was a scan of the whole document repeated per item in it:
+
+- the identifier extractor asked *"does this overlap anything claimed so far?"* by walking every earlier claim — 72 million comparisons on one CDR. It is a byte mask now.
+- the seen-window sorted every date in the document for every entity in it — 48 million. It is a bisect now.
+- a CSV row's character span re-split the entire file, per row. The line offsets are computed once.
+
+**106 KB now takes 3.8s, and it is linear** — 8x the document costs 7.4x the time, asserted by `test_ingest_is_linear_in_document_size`.
+
+**2. Provenance grew one entry per mention.** A man named 400 times carried 400 offsets, re-read and re-serialised on every upsert — which is what made ingest quadratic — and then arrived in the model's context as a **23,000-character node**. A citation needs *a* place in the document, not every place: the store keeps **three offsets per document** and the count is written separately as `prose_mentions`, which is a more useful fact than the offsets were. That node is now 350 characters.
+
+**3. No tool result had a ceiling.** `timeline` returned **419,224 characters** — about 105,000 tokens — in a single call. `communities` returned 81,035. The only limit anywhere was a `[:60000]` slice of the JSON string, which cut **mid-object**: on any case big enough to reach it, the model was handed text that was not valid JSON, with nothing saying so.
+
+Now every tool result passes through one bound (`agent/loop.py`, `_json`): graph rows are slimmed to what an answer can use, lists are capped, and anything still over **12,000 characters** is shrunk *structurally* — fewer items, never half an item — with a note telling the model what was cut and to narrow the question. **The model sees a constant amount of the case however large the case gets**, and `test_no_tool_can_put_more_than_its_ceiling_in_front_of_the_model` asserts it against a literal, not against the constant.
+
+**4. Betweenness is exact only while exact is affordable.** It was **36.4s of a 38.7s recompute** on a 2,685-node case, and a recompute runs after every ingest. Above **500 projected nodes** it is estimated from 128 sampled pivots with a fixed seed — deterministic, same numbers on every machine, and it preserves the ranking at the top, which is all any finding reads. **The demo case is 125 nodes, so it is still exact to the last decimal.** Where it is an estimate the system says "about" in the sentence the officer reads, because an estimate read out as a measurement is the thing a judge asks the method of.
+
+**What this does not fix, and you should know it before you promise it:** a 50,000-row CDR still takes about a minute and a half to ingest and recompute. That is linear and it is honest, but it is not instant, and nothing in the interface currently tells an officer how long a large file will take.
+
+---
+
 ## 4. Decisions
 
 **Do not re-open these without talking to a human first.** Each carries its reason. If you implement the alternative because it seemed better, you break the build for five other people.
@@ -496,21 +544,26 @@ What makes a case specific is `case_type` and `brief` on the case itself (`backe
 | D11 | **Findings are computed from the graph; the model narrates them** | Keeps D3 structurally true, and keeps the assistant useful with no key, no network and no budget — the state the demo machine may be in. | 09-04 |
 | D12 | **The engine is crime-type agnostic; the case carries its own type and brief** | *"it should work for any case… so it mold in every case possible."* Nothing in ingest, graph, analytics or the agent knows what trafficking is. §3.9. | 09-04 |
 | D13 | **Centrality is scored on a person-projected graph** | A kingpin whose only edge is `OWNS` to his own SIM scores near zero on the raw graph, because every path stops at the phone. "Who matters" is a question about people; a man and his SIM are not two actors. `nx_adapter.project_people`. | 09-04 |
-| D14 | ~~**The backend builds no UI and makes no design decisions**~~ **SUPERSEDED 09-05 (§0.5)** | Author's call: every visual decision is Jashan's. A "temporary" interface built to test an endpoint anchors decisions that are not the backend's to anchor. §10.1a. | 09-04 |
+| D14 | ~~**The backend builds no UI and makes no design decisions**~~ **SUPERSEDED 09-05 (§0.5)** | True while the front end was Jashan's. Kanwar took the interface on 09-05 and then pivoted it; §10.1a records who owns what now. | 09-04 |
 | D15 | **Proximity linking is for prose only, and claims the nearest name only** | Both learned by measurement, not opinion. Running co-occurrence over a CDR export links whoever sits in adjacent rows and added 606 meaningless edges, burying the real structure. And linking every person within the window to a nearby number gave Ravi ownership of Manjit's phone, which then produced a real-looking false path. | 09-04 |
-| D16 | **Frontend stack: React + Vite + TypeScript, Tailwind CSS, Radix Primitives, Lucide, Cytoscape.js, TanStack Query and declarative React Router** | Jashan's call after choosing the full interaction system. It keeps the UI local-first, typed and compatible with the frozen HTTP API. | 09-05 |
-| D17 | ~~**Calm Civic Forensic visual language; light mode only**~~ **SUPERSEDED by D25/D28 (§0.5)** | Officers need an interface that reads like dependable casework, not a technical or "hacker" console. Exact tokens and behavior are in §3.5a. | 09-05 |
+| D16 | **Frontend stack: React + Vite + TypeScript, Tailwind v4, Cytoscape.js, TanStack Query, React Router, Lucide** | Jashan's original choice, and it survived the pivot intact — the stack was never the problem. **Radix is no longer used**: the pivot removed every dialog, dropdown, tab and tooltip it was there for. | 09-05, revised 09-06 |
+| D17 | ~~**Calm Civic Forensic visual language; light mode only**~~ **SUPERSEDED by D25/D28 (§0.5)** | The light-only half survived and is now D28. The palette, the 60/40 split and the six sections it named describe a product that no longer exists; the spec that carried them is deleted, not archived. | 09-05 |
 | D18 | **A document we could not read must say so; it must never ingest in silence** | A scan has no text layer, so every step after the reader succeeds on an empty string — the document registers, custody records it as evidence received, and no entity ever appears, with nothing saying why. That is worse than an error, because it is indistinguishable from a document that had nothing in it. `read_document` counts blank pages and returns a `warnings` list; `POST /documents` passes it through and **the front end must display it**. Adding OCR is a *separate* decision and is not taken here (§13). | 09-05 |
 | D19 | **The two sources added last introduced no new node or edge type** | §5.1 is frozen and the front end is being built against it three days out. A social handle is an `account` namespaced by platform, a prior case is an `event`, and what kind of link a `CO_OCCURS` is gets said in `attrs.basis` — where `text_proximity`, `cdr_handset` and `co_accused` all already live. A `FOLLOWS` and a `CHARGED_IN` edge would each read better and would each cost a contract change, a message to four people and a front-end update. **If you are about to add one, this is why it is not there.** | 09-05 |
 | D20 | **An intelligence report is graded, and what it implies is discounted** | §1.1 names intelligence agency reports as a source, and until now one was read as an ordinary note — an uncorroborated tip from an untested source entered the graph at exactly the confidence a bank record does. Intelligence carries the Admiralty grading (reliability A–F, credibility 1–6) for precisely this reason, and it maps onto §5.1's `confidence` almost exactly. The factor is the **lower** of the two axes, not their product: they are independent judgements in the standard and multiplying them invents a precision we do not have. An ungraded intelligence report still gets 0.7 — no grading is not the same as a good one. | 09-05 |
 | D21 | **`_hidden_brokers` ranks people against people** | Its bar was the fifth-highest betweenness across *every* node, and then only people were ever candidates. On the demo case three of the top five are a document, a bank statement and a travel agency — so "top five" quietly meant "top two people", and **the more documents an officer uploaded the fewer brokers the case could surface.** Adding the criminal-history source pushed the kingpin to sixth overall and deleted demo query 2 outright. The graph was right; the yardstick was wrong. Guarded by `test_the_broker_threshold_ranks_people_against_people`. | 09-05 |
-| D22 | **With no model, `/ask` routes the question over the graph — it does not fall back to a name lookup** | The old fallback handed the officer's whole sentence to `find_entity`, which is a substring match on labels, so anything phrased as a *question* matched nothing: §9.2 query 1 returned *"Nothing in this case matches that name or identifier."* The centrepiece of the pitch died with the network. `agent/offline.py` routes instead — two entities named gives the path between them, an influence question gives the finding, a type word gives what the case holds of that kind — and where it cannot resolve a phrase it **names the candidates rather than picking one**, because a router that guesses confidently is the failure D18 and D21 are both about. It cannot invent a node that is not there: "the Ludhiana account" is how a person speaks and `account:50100244178` is what the graph holds, which is why the offline run sheet names the account. | 09-05 |
+| D22 | **There is no offline mode and no fallback. Ever.** | Kanwar's call, 09-05: *"why do we need that offline analysis anywhere, dont keep that at all."* `/ask`, `/brief` and `/investigate` either run the model or return **503** saying the assistant is unavailable. A degraded impostor that answers some questions and silently cannot answer others is worse than an outage, because the officer cannot tell which one he is talking to. **The key and a working network are demo-day requirements.** `backend/agent/offline.py` is deleted, not disabled. | 09-05 |
 | D23 | **A finding's `node_ids` is never returned as an answer's `highlight_path`** | The UI walks `highlight_path` hop by hop as an ordered route. A finding's `node_ids` is an unordered *set* — `[harbhajan, cdr_doc, ldh_031, jaswant, balraj, device]` is not a journey anyone can take — so returning the set as a path draws a route that does not exist, which is D3 inverted. A finding answer lights its subject only; the rest of the set is still cited and Evidence shows it. | 09-05 |
 | D24 | **One name: `shikonye`, lowercase, for the assistant and the product. No logo.** | Kanwar's call, 09-05: *"just one 'shikonye' in small letters everywhere without any logo or shitt."* CaseLens was a second thing to learn for no gain — an officer does not need a brand between him and the case. The assistant has a name because you talk to it; the application does not need one on top. | 09-05 |
 | D25 | **One chat interface. No section rail, no panels.** | *"just one chat interface and option to graph… one clean chatgpt like interface, but great shit at backend."* Six navigable sections is a filing cabinet, and an officer under time pressure does not explore a filing cabinet. Everything the panels showed — documents, findings, memory, the custody chain, an entity's profile — is reachable by asking for it, which is one skill instead of six. The graph appears when an answer has a route to show. | 09-05 |
 | D26 | **Nothing is invoked by syntax. No slash commands, no ids typed by a human.** | *"the bot should only fire from chat message, because we are making for non technical peopleee."* A command language is a second product the officer has to learn, and the moment one exists the interface has two classes of user. He says "the Ludhiana account" and the assistant resolves it — resolving it is the assistant's job and it has `find_entity` to do it with. | 09-05 |
 | D27 | **The conversation is stored on the case, not in the browser** | A teammate remembers the line above. `ask` used to send `messages=[{one prompt}]`, so the officer was reading a thread and talking to something with no memory of it — "and what about him?" could not work because there was no him. The thread is a table on the case: it survives a reload, reaches a colleague opening the same case, and is what makes multi-turn possible at all. The referent set (the ids the last answer rested on) is carried forward **as ids**, because asking a model to remember harder is not a mechanism. | 09-05 |
 | D28 | **Near-colourless interface; Evidence Amber is the only saturated colour and it means one thing** | An officer reads text here for an hour. Every accent not carrying meaning competes with the words. One ink, two greys, hairline borders — and amber exclusively for *this is the path the answer rests on*, so the one colour in the product is also the one claim that matters. | 09-05 |
+| D29 | **The case's brain is a visible, growing thing — not a context window, and not a dashboard either** | Kanwar's call, 09-06: *"we are just a bot doing calls based on brain and graph of case so its nothing like context window anywheree."* A chat assistant that pastes documents into a window forgets the first one to fit the fortieth. This one holds the case on disk and queries it, so the fortieth document makes the first worth more. The interface shows what the brain holds, says what grew when it grows, and lets the officer open it — in one line of text and one panel, because D25 still stands. §2.5. | 09-06 |
+| D30 | **Every tool result is bounded before it reaches the model** | Measured 09-06: `timeline` put 419,224 characters — ~105k tokens — into one tool call on a *small* case, and the only limit was a string slice that cut mid-object and produced invalid JSON. If the size of the case decides how much text reaches the model then the case is the context window, and §2.5 is a slogan rather than an architecture. Truncation is structural and always announced. §3.10. | 09-06 |
+| D31 | **Provenance is capped at three offsets per document; the count is kept separately** | One entry per mention made ingest quadratic (63s for 106 KB) and put a 23,000-character node in front of the model. A citation needs one place in the document — `read_source_doc` opens it — and *named 400 times* is a better fact than 400 offsets. `prose_mentions`, and it says prose because that is all it counts. §3.10. | 09-06 |
+| D32 | **Betweenness is exact below 500 projected nodes and estimated above it — and says which** | It was 36.4s of a 38.7s recompute, and a recompute runs after every ingest. Sampled pivots with a fixed seed are deterministic and preserve the top of the ranking, which is all a finding reads. The demo case stays exact. An estimate is never read out as a measurement: the sentence says "about". §3.10. | 09-06 |
+| D33 | **Anything the officer cannot see, he can ask for — including the custody chain** | The pivot removed every panel (D25), and with them the only surface for the *Blockchain & Cybersecurity* beat the round is judged on. `chain_of_custody` is a read tool, so *"has this been tampered with?"* is answered in the conversation like everything else. §5.2. | 09-06 |
 
 ---
 
@@ -580,6 +633,7 @@ Every tool is scoped to a single case. Every tool returns IDs the agent must cit
 | `anomalies` | `(window_hours: int = 24)` | `[{kind, node_ids, edge_ids, ts, description}]` |
 | `read_source_doc` | `(doc_id: str, start: int = None, end: int = None)` | `{text, doc_id, start, end}` |
 | `search_web` | `(query: str)` | `[{title, url, snippet}]` — OSINT only, never case data |
+| `chain_of_custody` | `(limit: int = 12)` | `{intact, entries, broken_at, reason, recent: [...]}` — **added 2026-09-06.** The interface has no custody panel any more (D25), so *"has this been tampered with?"* was a question about the one property the theme is judged on that the assistant had no way to answer. |
 
 `search_web` is the one tool that leaves the machine. **Never send case content to it** — send only entity names or identifiers that the officer has already made public, and log every call to the custody chain. *(Implemented as a logged stub — no provider is wired up. It returns a message saying so. That is deliberate: the boundary is in place, the provider is a decision nobody has made.)*
 
@@ -678,16 +732,15 @@ Everything is scoped to a case. There is no endpoint that reads across cases exc
 **Three things the front end should know about the shapes:**
 
 1. **`/ask` and `/brief` return §5.3 plus a `verified` block** — `{ok, dropped_nodes, dropped_edges}`. The backend has already checked every citation against the graph and stripped any that did not exist. **If `verified.ok` is false, show that** — an answer whose citations failed is not an answer, and hiding it is the one thing that would make this dishonest.
-2. **`/brief` returns deterministic findings *and* a narrative.** `findings` comes from the graph and is always present, even with no API key and no network. `narrative` is the model's version. If the model is unavailable the narrative says so in `caveats` and the findings still stand — design for that state, it is the one the demo machine may be in. **`verified` really is always present now**, including on a case with no documents, where it reports a pass with nothing in it (`ok: true`, both dropped lists empty) rather than being absent: nothing was cited because nothing has been found yet, which is not a verification failure. It was missing there until 2026-09-05, and reading it undefensively white-screened the workspace.
+2. **`/brief` returns deterministic findings *and* a narrative — and with no model it returns neither.** `findings` is computed from the graph and needs nothing external; `narrative` is the model's version of them. **But `/brief` itself is a 503 when the model cannot be reached** (D22): there is no degraded briefing carrying the findings with an apology in `caveats`, because a fallback is exactly what was deleted. `/ask` and `/investigate` are the same. The interface says the assistant is unreachable and that the case is untouched, and it says it on opening the case rather than after he has typed a question. **`verified` is always present**, including on a case with no documents, where it reports a pass with nothing in it (`contract.verified_vacuously`) rather than being absent.
 
-   **With no model, `/ask` still answers a question rather than looking up a name** (D22). Two entities named returns the real path between them with `highlight_path` set, so the split screen works offline; an influence question returns the finding. Where the router cannot resolve a phrase it says so in `caveats` and names the candidates — expect and render those.
-3. **`highlight_path` is the render instruction.** It is an ordered list of node ids. Lighting exactly those, in order, is what makes the split screen the reasoning rather than a decoration (D3).
+3. **`highlight_path` is the render instruction.** It is an ordered list of node ids. Lighting exactly those, in order, is what makes the graph the reasoning rather than a decoration (D3).
 
 ---
 
 ## 6. Repo layout
 
-Actual, as built. `frontend/` is Jashan's and remains isolated from the backend implementation.
+Actual, as built.
 
 ```
 backend/
@@ -701,7 +754,8 @@ backend/
     pipeline.py     the orchestrator: doc -> nodes/edges -> custody -> analytics
   graph/
     schema.py       §5.1 frozen contract, id normalisation, the no-source rule
-    store.py        one SQLite file per case; nodes, edges, docs, analytics, agent_memory
+    store.py        one SQLite file per case; nodes, edges, docs, analytics, agent_memory,
+                    and the per-case conversation (D27)
     nx_adapter.py   NetworkX views, path finding, project_people (D13)
   analytics/
     metrics.py      betweenness, pagerank, degree, Louvain, the `why` strings
@@ -709,16 +763,17 @@ backend/
   agent/
     tools.py        §5.2 read tools + the act tools
     contract.py     §5.3 schema and verify() — the citation check
-    loop.py         ask / brief / investigate, tool_runner
-    offline.py      routes a question over the graph with no model (D22)
+    loop.py         ask / brief / investigate, tool_runner. No fallback path (D22)
   custody/
     chain.py        the hash chain (§5.4)
   api/
     main.py         FastAPI — §5.6, the front end's contract
-frontend/           React + Vite + TypeScript officer interface
-  src/components/   CaseLens shell, accessible dialogs and reusable controls
-  src/pages/        case list and case-workspace routes
-  src/lib/          frozen API client, formatting and local preferences
+frontend/           React + Vite + TypeScript — one chat (D25)
+  src/pages/Chat.tsx          the whole product: rail, conversation, composer
+  src/components/             the graph panel and the evidence trail
+  src/lib/api.ts              the §5.6 client
+  src/types.ts                the §5.1/§5.3/§5.6 shapes, mirrored
+  src/index.css               the palette (D28) and the two animations
 data/
   cases/            per-case stores (gitignored)
   synthetic/
@@ -726,17 +781,18 @@ data/
     tamper.py       breaks/restores a synthetic case's custody chain (§9.3 live)
     out/            the generated CSVs, FIRs and GROUND_TRUTH.json
 tests/
-  test_core.py      35 tests, incl. the planted-truth assertions
+  test_core.py      the planted-truth assertions and the regression guards
 docs/
-  demo-script.md    the run sheet for the 8th, incl. the offline variant
+  demo-script.md    the run sheet for the 8th
   demo-fraud-complaint.txt   the §6 crime-type-agnostic beat, uploaded live
 ```
 
 ---
 
+
 ## 7. Setup
 
-**Stack:** Python 3.11+ (verified on 3.12) · FastAPI · NetworkX · SQLite · Anthropic SDK. Frontend: Node.js 20.19+ or 22.12+ · React · Vite · TypeScript · Tailwind CSS · Radix Primitives · Lucide · Cytoscape.js · TanStack Query.
+**Stack:** Python 3.11+ (verified on 3.12) · FastAPI · NetworkX · SQLite · Anthropic SDK. Frontend: Node.js 20.19+ or 22.12+ · React · Vite · TypeScript · Tailwind CSS v4 · Lucide · Cytoscape.js · TanStack Query · React Router. **Radix, clsx and tailwind-merge were removed on 09-06** — they were there for the dialogs, dropdowns, tabs and tooltips of the workspace the pivot deleted.
 
 **Everything runs from the repo root**, not from `backend/` — `data.synthetic` and `backend.*` are one import tree, and splitting the root breaks it.
 
@@ -813,15 +869,15 @@ Because we planted it, we can state exactly what the system should find and show
 
 ### 9.2 The two queries we demo
 
-**1. "How is Ravi connected to the Ludhiana account?"** — proves the graph causes the answer. The path animates, the citations click through to the source FIR.
+**1. "How is Ravi connected to the Ludhiana account?"** — proves the graph causes the answer. The route lights hop by hop on the brain, and *Rests on 5 entities* opens the trail down to the line of the FIR the claim was read out of.
 
-**2. "Who matters most in this case?"** — the system names a man who appears in **zero FIRs**, found by betweenness bridging two clusters that otherwise never touch. Then we open the source view and show he really is in no report.
+**2. "Who matters most in this case?"** — the system names a man who appears in **zero FIRs**, found by betweenness bridging two clusters that otherwise never touch. Then his row in the evidence trail reads *read out of 1 document* — a call log — and he really is in no report.
 
 That second one is the moment the room understands what the system does. Everything else is setup for it.
 
 ### 9.3 Then the theme
 
-Open the custody log, show every ingest and inference hash-linked, alter one entry, show the chain break. Ten seconds. Answers "where's the blockchain?" before anyone asks it.
+**Ask it** — *"has anything in this case been tampered with?"* — and it answers off the chain (D33). Break one entry with `data.synthetic.tamper`, ask again, and it names **entry 2** and why. Restore, ask once more: intact. Ten seconds, and it answers "where's the blockchain?" before anyone asks it. There is no custody panel to open; after D25 there is nothing to open anything from.
 
 ---
 
@@ -836,38 +892,22 @@ Contracts (§5) are frozen in the first hour so these can run in parallel withou
 | A · Ingest & extraction | PDF/CSV parsing, regex, NER, provenance | Kanwar | **built** |
 | B · Graph & analytics | schema, SQLite store, NetworkX, the four algorithms | Kanwar | **built** |
 | C · Agent & tools | tool implementations, agent loop, answer contract | Kanwar | **built** |
-| **D · Everything the user sees** | **the entire front end and every design decision — see §10.1a** | **Jashan** (design language, Cases screen) · **Kanwar** (case workspace, 09-05 — see §10.1b) | **built** — every section of §3.5a is live against §5.6 |
+| **D · Everything the user sees** | the whole interface — one chat, the graph panel, the evidence trail | **Kanwar**, since 09-05 (§10.1a) | **built**, and rebuilt by the pivot |
 | E · Synthetic data | the generator and the planted structure (§9.1) | Kanwar | **built** |
 | F · Custody + demo script | hash chain, `docs/demo-script.md`, the run-through | Kanwar / `UNASSIGNED` | chain built, script not written |
 
 **Roster is `UNKNOWN`.** Known so far: **Jashan Garg** (repo owner), **Kanwar Sekhon**, **Gurpartap** (holds the API key). SIH requires six with at least one woman. **Whoever knows the full roster: fill this table in and delete this line.**
 
-### 10.1a The split — read this before you write a line of code
+### 10.1a Who owns what — rewritten 2026-09-06
 
-**There are two halves of this project and they do not overlap.**
+**This replaces the old §10.1a/§10.1b split, which said the backend builds no UI. It has not been true since 09-05 and it must not be followed.**
 
-**Jashan owns everything the user sees.** Not "the UI layer" — *everything visual*. Layout, typography, colour, spacing, motion, the split-screen proportions, how the graph is drawn, what a node looks like, how a citation renders, how the chat reads, the entity panel, the case list, empty states, loading states, error states, the whole visual language. **Every design decision in this project is his.** There is no design system handed down from the backend, no reference mockup, no "we already picked the colours". Nobody has, and nobody is going to.
+**Kanwar owns both halves right now** — ingest, graph, analytics, the agent, custody, the HTTP API, *and* the interface. The front end moved to him on the evening of 09-05 because the workspace was the only thing standing between a working backend and a demo, and then the pivot (§0.5) replaced that workspace with one chat.
 
-**Kanwar owns everything underneath.** Ingest, the graph, analytics, the agent, custody, and the HTTP API. That half is built (§11).
+**Jashan built the shell and the Cases screen at 02:09 on 09-05, and none of it was wrong.** The product moved under it. If he picks the interface back up, **§3.5 is the specification** and his judgement on how it looks still wins — but it has to be the interface in §3.5, not the one in the spec that used to be here.
 
-**Consequences, both directions:**
+**Where the boundary is, if the front end splits again:** `frontend/` is one side, `backend/` + `data/` + `tests/` the other, and **§5.6 is the seam**. It is frozen and it has not moved through two interface rewrites, which is the whole reason those rewrites were cheap.
 
-- **If you are Jashan's agent:** the backend is done and running. You do not need to wait for anyone, and you do not need to ask what anything should look like — that is your call, entirely. **§5.6 is your contract**: every endpoint, every shape, already frozen and already returning real data from the demo case. Build against it. If you need a field that does not exist, say so and it gets added — do not invent a second API, and do not reshape the data in the client to work around a missing endpoint.
-- **If you are Kanwar's agent (or anyone working the backend):** **do not build UI, and do not make design decisions.** No pages, no components, no CSS, no colour choices, no "temporary" front end to test against, no HTML mock so we can see it working. Test with `pytest`, `curl` and `/docs`. Producing a scrappy interface "just to check the endpoint" takes the decision out of Jashan's hands by anchoring it, and it is not yours to anchor. The one thing the backend owes the front end is a clean, honest, documented API — that is in §5.6.
-
-**Where the boundary literally is:** `frontend/` is Jashan's, and nothing outside it is. `backend/`, `data/` and `tests/` are the backend's. The README belongs to whoever is changing something, and §12 records it.
-
-### 10.1b The workspace half moved to Kanwar — 2026-09-05
-
-**Everything in §10.1a above was true until this section, and one part of it no longer is.** Kanwar's call on the evening of 09-05, three days before the internal round: **his side built the case workspace** — the `shikonye` conversation, Connections, Documents, Findings, Memory and Custody — because the Cases screen was the only screen that existed and the workspace is what a judge is actually shown.
-
-**This does not un-assign the front end from Jashan, and it changes nothing about §3.5a.** The workspace was built *to* his specification, not around it: CaseLens, `shikonye` lowercase with no avatar, the Calm Civic Forensic palette, light-only, 60/40 split with a 40–75% draggable divider, focus mode, tablet tabs, masked identifiers until Reveal, four-second toasts, skeletons and stated error states. The design decisions in §3.5a were his and were followed; none were re-taken.
-
-**What this means for whoever picks up next:**
-
-- **Do not rebuild the workspace.** It exists, it runs against the real API, and §11 lists what it covers. Change it, and change §11 with it.
-- **Design changes are still Jashan's call.** If the workspace looks wrong to him, his judgement wins over what is there — §3.5a is still the specification, and this is still his front end.
-- **The split in §10.1a otherwise stands.** The backend still builds no UI on its own initiative; this was an explicit instruction from Kanwar, not a drift.
 
 ### 10.2 Before the 8th
 
@@ -884,9 +924,9 @@ The failure mode of a six-person hackathon is everyone building alone until hour
 | **8–10** | **Integration #1** — ingest → graph → analytics end to end on the demo case |
 | 10–14 | Agent tools wired; first real answer with real citations |
 | **14–16** | **Integration #2** — chat → graph highlight working end to end |
-| 16–20 | Custody chain, OSINT tool, entity panel, polish |
+| 16–20 | Custody chain, OSINT tool, the evidence trail, polish |
 | **20–22** | **Integration #3 — feature freeze.** Nothing new after this. |
-| 22–24 | Demo rehearsed end to end at least three times, on the demo machine, offline-safe |
+| 22–24 | Demo rehearsed end to end at least three times, on the demo machine, **with the key loaded and the network checked** (D22 — there is no offline run) |
 
 **Feature freeze at hour 20 is not negotiable.** A demo that has been run three times beats a better system that has been run once.
 
@@ -894,83 +934,60 @@ The failure mode of a six-person hackathon is everyone building alone until hour
 
 ## 11. Current state
 
-**Updated 2026-09-05. Whoever changes this project: change this section too.**
+**Updated 2026-09-06. Whoever changes this project: change this section too.**
 
-**The entire backend is built and running. The front end is built — Cases screen and the full case workspace, live against the real API. `docs/demo-script.md` and the live model call are what is left.**
+**Everything is built. One thing has never run: the live model call.** The backend is feature-complete against §1.1, the interface is the one chat of §0.5, and both were driven against the real API today. `docs/demo-script.md` is written and current.
 
 | Part | State |
 |---|---|
-| Ingest — PDF/CSV/text, regex identifiers, cue NER, provenance | **built, tested** — PDF exercised against a real file, readable and scanned (2026-09-05) |
-| **Sources — all seven of §1.1** | **built, tested** (2026-09-05) — social, criminal history and graded intelligence were the last three. See §1.2a |
+| Ingest — PDF/CSV/text, regex identifiers, cue NER, provenance | **built, tested** — PDF exercised against a real file, readable and scanned |
+| **Ingest at size** | **linear, measured** (09-06) — 8x the document costs 7.4x the time; three quadratics removed. §3.10 |
+| Sources — all seven of §1.1 | **built, tested** — see §1.2a |
 | Graph — SQLite per case, §5.1 schema, idempotent merge | **built, tested** |
-| Analytics — betweenness, pagerank, degree, Louvain, anomalies, findings | **built, tested** |
-| Agent — 9 read tools + 5 act tools, tool loop, §5.3 contract, self-verification | **built**, exercised offline |
-| Custody — hash chain, tamper detection | **built, tested** |
+| Analytics — betweenness, pagerank, degree, Louvain, anomalies, findings | **built, tested**; betweenness exact under 500 projected nodes, estimated and labelled above it (D32) |
+| Agent — 9 read tools + 5 act tools, tool loop, §5.3 contract, self-verification | **built**, exercised without a model |
+| **Tool results — bounded** | **built, tested** (09-06) — nothing can put more than 12,000 characters in front of the model, whatever the case holds. D30 |
+| Custody — hash chain, tamper detection, **reachable by asking** (D33) | **built, tested** |
 | API — every endpoint in §5.6 | **built**, returning real data |
-| Demo case — generator + planted ground truth | **built, tested** |
-| **Front end — Cases screen** | **built** — React foundation, design tokens, live Cases list, case CRUD, persisted officer/accessibility settings, loading/empty/error states |
-| **Front end — case workspace** | **built, exercised in a browser against `demo-114` (2026-09-05)** — all six §3.5a sections; **19 of §5.6's 22 endpoints are reached** from the UI |
-| `docs/demo-script.md` | **NOT WRITTEN** — workstream F |
+| Demo case — generator + planted ground truth | **built, tested** — **125 nodes: 116 entities and 9 documents**, 1,148 links. The interface says *116 entities · 1,148 links · 9 documents*, because a document is a node but it is not an entity and an upload reports the two separately. |
+| **Front end — one chat** | **built, driven in a browser against `demo-114` (2026-09-06)**: the thread, the evidence trail, the brain panel with the route lit hop by hop, upload by paperclip and by drag-and-drop, and the brain line reporting what each document added |
+| `docs/demo-script.md` | **written, current with the pivot** |
 
-**Verified against the demo case**, `python -m pytest tests -q` → **35 passed**:
+**`python -m pytest tests -q` → 37 passed.** What that covers, beyond the §9.1 plants:
 
-- The kingpin is named in **no report** — only in CDR metadata — and the system **leads with him**: *"Harbhajan Dhillon connects this network but appears in no report."* (§9.2 query 2.)
-- Ravi reaches the Delhi account **through the tower co-location**, and there is provably no call between the two numbers, so the system cannot claim contact. (§9.2 query 1.)
-- Two cases of **different kinds** (trafficking, vendor fraud) share nothing.
-- Altering one custody entry **breaks the chain at that entry**. (§9.3.)
-- A 40-page document ingests and re-runs **all** analytics in about **1.4 seconds** on the build machine — measured 2026-09-05, not estimated. It said "well under a second" until then, which was true before the last three sources widened the recompute. The test's bar is 5s, deliberately loose: it exists to catch someone putting a model in the ingest path (D4), not to police tenths of a second.
-- A **real two-page FIR in PDF** — tables, wrapped lines, a case that continues across the page break — reaches the graph with its people, both phone numbers, the vehicle and the account, and the citation opens.
-- A **scanned PDF** returns a warning saying it could not be read, instead of registering as evidence and adding nothing.
-- A **criminal register** names Manjit Singh and Suneel Kumar as repeat offenders — three prior cases each, one conviction each — and links four pairs of people through a **shared charge sheet**, which nothing in the current case links directly.
-- A **C3-graded intelligence report** enters everything it implies at **70% confidence** and says so at upload, while the fact that it names those men stays at 100%.
-- **No source added after 09-04 crosses the Ludhiana/Delhi divide**, so the kingpin is still the only bridge and demo query 2 still works. This is asserted, not assumed.
-- **An upload over HTTP is filed under the officer's filename**, in the document list, in the citations and in the custody chain — asserted across the HTTP seam, not against `ingest_file`.
-- **With no model, both §9.2 queries still work.** Query 1 traces the real path and sets `highlight_path`; query 2 names Harbhajan Dhillon by leading with the finding rather than the raw ranking, which would name Sukhwinder Kaur.
-- **The §9.3 tamper beat can be performed and undone** — `data.synthetic.tamper` breaks entry 2, the API names it, and restore is byte-identical so the demo continues on the same case. The tool refuses any case not marked synthetic.
+- The kingpin is named in **no report** and the system **leads with him** (§9.2 query 2).
+- Ravi reaches the Delhi account **through the tower**, and no call between the two numbers exists, so the system cannot claim contact (§9.2 query 1).
+- Two cases of different kinds share nothing; altering one custody entry breaks the chain **at that entry**.
+- A real two-page FIR in PDF reaches the graph and its citation opens; **a scan says it could not be read** instead of ingesting in silence.
+- No source added after 09-04 crosses the Ludhiana/Delhi divide, so the kingpin is still the only bridge.
+- An upload over HTTP is filed under **the officer's** filename, in the document list, the citations and the custody chain.
+- **Ingest is linear in document size**, and the guard fails if any one of the three quadratics comes back.
+- **No tool can put more than its ceiling in front of the model**, and what it does return is still valid JSON.
+- A man named 400 times keeps **three offsets and the count**, and the offset that is kept still opens.
+- Betweenness is **exact on the demo case** and **says "about"** when it is an estimate.
 
-Demo case, for scale: **125 nodes (116 entities + 9 documents), 1,148 links, 9 documents, 7 communities, 38 anomalies, 26 findings.**
+**Every new guard was mutation-checked** — the fix reverted, the test watched to fail, the fix restored. Three of the five did not fail the first time: two asserted against the same constant they were testing, which passes at any setting, and one had a bar loose enough to sit on both sides of the bug. **A guard that has never failed is not a guard**, and two of these had to be rewritten before they were.
 
 **Not done, and honest about it:**
 
-- **The agent loop has never run against the live API.** There is no key on the build machine (§8: it is Gurpartap's). Every tool, the contract, the verification and the offline path are tested; the model call itself is not. It remains the highest-risk untested thing in the repo.
-
-  **Deliberately deferred — Kanwar's call, 2026-09-04:** *"live test will be done only when every other part will be built by me and jashan."* Do **not** spend the key probing it before then. The reason it can wait is D11: findings, the graph, analytics and custody all work without a model, so nothing downstream is blocked on this answer. The reason it cannot wait forever is that it is a single point of failure on demo day. **Run it once, together, as soon as the front end can display the result — before the 8th, not on it.**
+- **The agent loop has never run against the live API.** There is no key on the build machine (§8: it is Gurpartap's). Every tool, the contract, the verification and the interface's handling of both outcomes are tested; the model call itself is not. **It is the only unfinished thing in the repo, and since D22 removed the fallback it is also a demo-day requirement**: no key or no network means no assistant, deliberately. **Run it once, together, before the 8th.**
+- **A 50,000-row CDR takes about a minute and a half** to ingest and recompute. Linear and honest, but not instant, and nothing in the interface tells the officer how long a large file will take.
 - `search_web` is a logged stub — no provider chosen.
-- **A scanned PDF is announced, not read.** There is no OCR and none was added; whether scans are in scope at all is still open (§13). What changed on 2026-09-05 is that the system now says so rather than accepting the file in silence.
+- **A scanned PDF is announced, not read.** No OCR; whether scans are in scope is still §13's question.
+- **`prose_mentions` counts prose only** — a structured row's mentions are not counted, and the attribute name says so. Volume in a CDR is already visible as links.
+- **The cue NER reads two intelligence frames, not every one.** Widening the regex to leap a clause is the D15 bug again.
 - **exposurie** (Kanwar's other project) is paused for this.
-- **The cue NER reads two intelligence frames, not every one.** "The source names X" and "X is reported to be …" are handled; a name followed by a subordinate clause before its verb is not, and that is spaCy's job (`ner_backend()` says which layers are live). Widening the regex to leap a clause is exactly the bug D15 records.
-- **Scans still are not read** — unchanged, and still §13's question.
 
-**Fixed 2026-09-05 — all three defects the workspace session left open**, each verified against the running server and not only in tests:
+**What the interface reaches, and what it deliberately does not.** Thirteen of §5.6's twenty-two endpoints are called from the chat: the case list and its lifecycle, the conversation and clearing it, `/ask`, `/brief`, `/documents` (upload), `/graph`, `/nodes/{id}`, `/source` and `/memory`. **The other nine are reached by asking** — `/path`, `/timeline`, `/analytics`, `/custody` and `/findings/{id}/investigate` are all things the agent's own tools cover, and after D25 that is the design rather than a gap. `POST /documents/text` and `POST /analytics/recompute` have no caller and need none.
 
-- **A live upload is filed under the officer's filename again.** `ingest_file` takes a `filename` parameter and `POST /documents` passes `file.filename`, so `fir_114_003.pdf` is `doc:fir_114_003` in the document list, in every citation and in the custody chain instead of `doc:tmpegm_u9dr`. The name is basenamed on the way in, because a browser may send a path and this string is displayed and stored, not just hashed. **Guarded by a test that goes over HTTP**, not one that calls `ingest_file` — the defect was `main.py` never passing the argument, so a unit test of the function would have passed against the bug. Same shape as the bug itself: the units were all fine and the seam was not.
-- **`/brief` carries `verified` on an empty case**, reporting a pass with nothing in it (`ok: true`, both lists empty) rather than being absent. Nothing was cited because nothing has been found yet, which is not a verification failure — reporting `ok: false` would put a red "could not be verified" panel on every new case. The front end's defensive read stays correct and is now belt-and-braces.
-- **Offline `/ask` routes the question** — D22, `backend/agent/offline.py`. **Both §9.2 queries now survive a round with no key**, which is what §13's "do we present live" question was really about. See §12 for what it does and what it refuses to do.
+**Three defects were found by driving the interface today, and none of them by a test:**
 
-**Next, and it is now one item:**
-
-1. **The live API call, once, together, before the 8th.** Every screen that consumes it already handles both outcomes, including the model being unreachable. **This is the only unfinished thing in the repo.**
-
-Everything else still open here is a *known limit*, not a task: no OCR (§13), `search_web` is a stub, and the cue NER reads two intelligence frames rather than every one.
-
-*(The case workspace, `docs/demo-script.md`, the upload defect, the `/brief` block and the offline fallback were all items on this list and are all done — 2026-09-05, §10.1b and §12.)*
-
-**The three §5.6 endpoints the UI does not call, and why** — none is an oversight, and each is a small job if it turns out to be wanted:
-
-- **`POST /documents/text`** — pasting text in as a document. §3.5a's composer is text *or* an attachment, and text there is a question for `shikonye`, not evidence. Nothing in the spec asks for paste-as-evidence.
-- **`GET /timeline`** — §3.5a names six workspace sections and a timeline is not one of them. Adding a seventh is a design decision and therefore Jashan's.
-- **`POST /analytics/recompute`** — every write path already recomputes server-side and the client invalidates its queries after an upload, so a manual button would only ever confirm what already happened.
-
-*(PDF ingest and the three missing §1.1 sources were items 2 and 3 and are both done — 2026-09-05, §12. Every source the problem statement names now has a handler and a file in the demo case: §1.2a.)*
-
-**Jashan — three things in this change touch what you draw**, and none of them changes §5.6:
-
-- **`event` nodes now appear in `/graph`.** `event` was always a legal §5.1 node type; it had never been in the demo data before. There are 12 on the demo case — 9 prior cases from the register, labelled `Case 88/2019`, with `attrs.offence`, `attrs.disposition` (`convicted` / `acquitted` / `pending` / `null`) and `attrs.station`; and 3 more that `patterns.py` has always pulled out of FIR numbers written in prose, which carry a bare label and no attrs.
-- **`MENTIONED_IN` is now a visible edge.** `/graph` drops document nodes by default, so `MENTIONED_IN` used to vanish with them. Person → prior-case edges are `MENTIONED_IN` and they survive that filter.
-- **Two new finding kinds**: `repeat_offender` and `prior_association`. Same shape as every other finding, so if you render by `kind` with a fallback they cost you nothing.
-- Also: `document.meta.grading` and `document.meta.confidence_factor` exist on intelligence documents, and the D18 `warnings` list carries a plain sentence about it. Displaying that is the same requirement D18 already put on you, not a new one.
+- **`/nodes/{id}` counted one document once per offset.** Ravi Kumar read "out of 12 documents" on a case that holds nine. Deduplicated.
+- **The evidence trail showed ids.** `person:manjit_singh` where the officer should read "Manjit Singh" — D26 broken in a screen written the day D26 was written. It fetches the entity before it draws the row now.
+- **A case whose assistant is unreachable said nothing** until the officer had typed a question and pressed send. It says so on opening the case.
 
 ---
+
 
 ## 12. Changelog
 
@@ -1036,6 +1053,18 @@ Everything else still open here is a *known limit*, not a task: no OCR (§13), `
   - **30 → 33 tests.** Build and lint clean. `docs/demo-script.md` updated: the offline variant is gone, and it now tells the presenter **never to type an entity id on stage** — saying "the Ludhiana account" and having it resolved is the demonstration (D26).
 
 
+- **2026-09-06 (Kanwar + Claude)** — **the pivot's dead skin removed, the interface built on top of it, and the backend made to survive a real case file.** What the next agent needs to know:
+  - **Every pre-pivot design description is deleted, not archived.** §3.5a (the Calm Civic Forensic spec, the 60/40 split, the six workspace sections) is gone; **§3.5 now describes the interface that exists**. §10.1a/§10.1b are replaced by one short ownership section. §6's tree, §5.6's note 2, §10.3's "offline-safe" row, §13's offline line, D22's row and `frontend/README.md` all said things that stopped being true on 09-05. A dead spec in a file four agents read is something one of them will eventually build to.
+  - **New §2.5, in his words: this is not a chat with a context window.** Each case has a brain on disk that grows with every document, and the assistant queries it with tools. Three consequences are checkable, and the cheapest is that **clearing the thread changes no answer**. **D29** is the interface half: what the brain holds is on screen at all times as one line, it says what grew when it grows, and the graph is the brain rather than a picture of an answer.
+  - **The interface gained four things and no new place to navigate to.** The evidence trail under an answer (cited entity → its documents → the exact line, `GET /source`); the brain line under the composer, which becomes *"fir_114_003.pdf — the brain grew by 7 entities and 29 links"* the moment a document lands; drag-and-drop anywhere on the screen; and three opening questions on an empty case, because with no panels the empty screen is the only place discoverability can live. The graph now also opens on an answer's cited *set*, lighting the links inside it and never a route (D23).
+  - **There is no stop button, deliberately.** The run is server-side and the answer is recorded on the case whether the tab waits or not, so a control that only stopped the waiting would be telling him something untrue. Deleting a case now takes two clicks — it destroys a brain.
+  - **§3.10 is the new backend section and it is all measurement.** Ingest was **quadratic three times over** (106 KB of prose: 63s → 3.8s, now linear); provenance grew one offset per mention and put a **23,000-character node** in the model's context (350 now); **no tool result had a ceiling** — `timeline` returned **419,224 characters** in one call — and the only limit was a string slice that cut mid-object into invalid JSON; and exact betweenness was **36.4s of a 38.7s recompute** that runs after every ingest. **D30–D32.**
+  - **`chain_of_custody` is a new read tool — D33, §5.2.** The pivot removed the custody panel and with it the only surface for the theme the round is judged on. It is a question now, like everything else.
+  - **The system prompt gained what the model could not know**: that the officer sees one chat and gets everything else by asking, that he will say "the Ludhiana account" and never an id, and that it is querying a brain rather than holding the case in a window.
+  - **25 → 37 tests, all mutation-checked.** Three of the five new guards were asleep on the first attempt: two asserted against the constant they were testing, one had a bar that sat on both sides of the bug. Fixed and re-checked.
+  - **The dead code went with the dead spec.** `frontend/` dropped **eight dependencies** — every Radix package, `clsx`, `tailwind-merge` — which existed for the dialogs, dropdowns, tabs and tooltips of the deleted workspace; the lockfile went from 2,087 lines to 980. Four API-client functions with no caller (`getHealth`, `getCase`, `getDocuments`, `getCustody`) and eleven types nothing referenced are gone. **Also purged from this file**: the block diagram's "SPLIT-SCREEN UI" box, §3.7's "empty workspace", §7's Radix line, §9.2's "open the source view", §9.3's "open the custody log", §10.3's "entity panel", and §5.6's note 2 — which still promised a briefing that arrives with an apology in `caveats` when the model is down, a thing D22 deleted a day earlier.
+  - **Three defects the browser found and the tests did not**: `/nodes/{id}` counted a document once per offset (12 documents on a 9-document case); the evidence trail printed entity ids at an officer who must never see one (D26); and a case with an unreachable assistant said nothing until he had typed a question.
+
 Append one line per session. What you built · what you changed in this file · what the next agent needs to know.
 
 ---
@@ -1047,5 +1076,5 @@ Answer these in-place when you learn the answer, and say who answered it.
 - **Who are the six team members?** Two on GitHub, Gurpartap named as a third. SIH requires six, at least one woman.
 - **Does the internal round score prototype, presentation, or both?** The PEC circular does not say. Changes how hours 20–24 are spent.
 - **Is there a submission artefact besides the demo** — idea PPT, doc, video? The national round wants an idea presentation; the internal round's requirement is unconfirmed.
-- **Do we present live or pre-record?** Online mode; unconfirmed. **The offline half of this is answered as of 2026-09-05:** the demo runs fully offline, including both §9.2 queries, the upload, the custody beat and the isolation beat — `docs/demo-script.md` has the offline variant and it is not a degraded one. What is still open is the round's own format, which is a question for Dr. Kanu Goel and not for the code.
+- **Do we present live or pre-record?** Online mode; unconfirmed. **The offline half of this was answered and then reversed on 2026-09-05:** there is no offline mode any more (D22), by his instruction and against advice given at the time. `/ask` needs the key and the network. **If the round is presented live, that is now a single point of failure with no mitigation** — the mitigation available is to pre-record, and that is a decision nobody has taken.
 - **Are scanned documents in scope?** Real FIRs are often photographs of paper, which have no text layer at all. As of 2026-09-05 the system detects them and says so (D18) but cannot read them; reading them means OCR, which is a dependency nobody has agreed to and which would put a lossy step in front of the graph. **Kanwar's call, not an agent's.**

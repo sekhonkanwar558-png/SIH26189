@@ -112,6 +112,16 @@ If the case does not contain the answer, say so plainly and use \
 here is what would tell you" is a good answer. Inventing a plausible one is the \
 only unforgivable failure here.
 
+WHAT THE OFFICER CAN ACTUALLY SEE
+
+One chat, and the graph when your answer has a route through it. There is no document list, no findings panel, no custody screen and no command he can type. **Anything he cannot see, he gets by asking you** — so answer "what's in this case", "what have you found", "where did that come from" and "has this been tampered with" in words, fully, rather than telling him to go and look. Use `chain_of_custody` for anything about tampering, integrity or whether the record can be trusted.
+
+He is not technical. He will say "the Ludhiana account", never `account:50100244178`. Resolving that is your job and it is never his. Do not ask him for an id, do not print ids in your answer, and do not teach him a syntax.
+
+WHAT YOU ARE RUNNING ON
+
+This case has a brain on disk — its graph, its analytics, its memory, its custody chain — and it grows every time a document arrives. You are not holding this case in a context window; you are querying that brain with tools, one call at a time. So never say you have "read" something you did not just fetch, never claim the case holds something because it feels likely, and remember that what you record with `record_conclusion` outlives this conversation and will be read back to you months from now.
+
 BEING USEFUL WITHOUT BEING ASKED
 
 You keep the case's memory. Use `recall` to check what you already concluded so \
@@ -240,6 +250,19 @@ def _bind(ctx: CaseContext) -> list[Callable]:
         ))
 
     @beta_tool
+    def chain_of_custody(limit: int = 12) -> str:
+        """Whether this case's evidence record is intact, and what it last recorded.
+
+        Use this whenever the officer asks about tampering, integrity, the chain
+        of custody, or whether the record can be trusted. It reports the
+        verification and the most recent entries, not the whole ledger.
+
+        Args:
+            limit: How many recent entries to return.
+        """
+        return _json(T.chain_of_custody(ctx, limit))
+
+    @beta_tool
     def recall(query: str = "", kind: str = "") -> str:
         """What you already concluded, asked or requested on this case in earlier sessions.
 
@@ -284,7 +307,7 @@ def _bind(ctx: CaseContext) -> list[Callable]:
         return _json(T.request_evidence(ctx, what, why))
 
     return [find_entity, neighbours, path_between, timeline, top_influencers,
-            communities, anomalies, read_source_doc, recall,
+            communities, anomalies, read_source_doc, chain_of_custody, recall,
             record_conclusion, open_question, request_evidence]
 
 
@@ -292,9 +315,115 @@ def _ids(raw: str) -> list[str]:
     return [x.strip() for x in (raw or "").split(",") if x.strip()]
 
 
+# What one tool call may put in front of the model. Measured 2026-09-06 on a
+# 3,265-node case built from a 2,000-row CDR — *small*, next to a real one:
+# `timeline` returned 419,224 characters (~105k tokens) in a single call,
+# `communities` 81,035 and `neighbours` on a busy number 42,430. Nothing capped
+# any of it.
+#
+# **This is the failure the whole product is an argument against** (§2.5). If a
+# case's size decides how much text reaches the model, then the case *is* the
+# context window after all, and the thing degrades into exactly the chatbot we
+# say it is not — slower and more expensive with every document, until it stops
+# answering at all.
+#
+# So the ceiling is on this side of the boundary, and it is fixed: the model
+# sees a constant amount of the case however large the case gets. What it does
+# not see, it can still reach — by narrowing the question and calling again,
+# which is what the note in a truncated result tells it to do.
+MAX_TOOL_ITEMS = 40
+MAX_TOOL_CHARS = 12000
+# Provenance is bounded in the store (`graph.store._merge_sources`); one ref is
+# all a citation needs, and `read_source_doc` opens it.
+KEEP_SOURCES = 1
+
+
+def _slim(value: Any) -> Any:
+    """Strip a graph row to what an answer can actually use.
+
+    A node arrives with every offset it was ever seen at and every attribute
+    ingest attached. The model needs the id (to cite), the label (to say), the
+    type, and one place to look — everything else is weight it pays for on
+    every turn.
+    """
+    if isinstance(value, list):
+        return [_slim(v) for v in value]
+    if not isinstance(value, dict):
+        return value
+
+    if "sources" in value and isinstance(value.get("sources"), list):
+        out = {k: _slim(v) for k, v in value.items() if k != "sources"}
+        refs = value["sources"]
+        out["sources"] = refs[:KEEP_SOURCES]
+        if len(refs) > KEEP_SOURCES:
+            out["source_count"] = len(refs)
+        return out
+    return {k: _slim(v) for k, v in value.items()}
+
+
 def _json(value: Any) -> str:
+    """Serialise a tool result for the model — bounded, and honest when it cut.
+
+    The old version ended in `[:60000]`, which sliced the JSON **mid-object**:
+    on any case big enough to reach it the model received text that was not
+    valid JSON at all, with nothing saying so. Truncation here is structural —
+    fewer items, never half an item — and it is always announced.
+    """
     import json
-    return json.dumps(value, ensure_ascii=False, default=str)[:60000]
+
+    def dump(v: Any) -> str:
+        return json.dumps(v, ensure_ascii=False, default=str)
+
+    value = _slim(value)
+
+    if isinstance(value, list) and len(value) > MAX_TOOL_ITEMS:
+        value = {"items": value[:MAX_TOOL_ITEMS], "shown": MAX_TOOL_ITEMS,
+                 "total": len(value),
+                 "note": f"{len(value) - MAX_TOOL_ITEMS} more not shown. Narrow the "
+                         f"question — by name, by type or by time — and call again."}
+
+    text = dump(value)
+    if len(text) <= MAX_TOOL_CHARS:
+        return text
+
+    # Still too big. Halve **every** list in the structure, repeatedly, until it
+    # fits — and keep the shape, because a caller reading `nodes` and `edges`
+    # must still find `nodes` and `edges`.
+    #
+    # It halves all of them rather than the longest one, and that is not a
+    # detail: `communities` is thirty lists of four thousand, so cutting the
+    # single longest each round converges in hundreds of rounds and the first
+    # version of this gave up and returned an error instead — taking a working
+    # tool away from the agent exactly when the case got big enough to need it.
+    # Halving everything converges in log2 of the longest list, whatever the
+    # breadth.
+    def halved(node: Any) -> Any:
+        if isinstance(node, list):
+            return [halved(v) for v in node[: max(1, len(node) // 2)]]
+        if isinstance(node, dict):
+            return {k: halved(v) for k, v in node.items()}
+        return node
+
+    def widest(node: Any) -> int:
+        if isinstance(node, list):
+            return max([len(node)] + [widest(v) for v in node])
+        if isinstance(node, dict):
+            return max([0] + [widest(v) for v in node.values()])
+        return 0
+
+    if isinstance(value, list):
+        value = {"items": value, "total": len(value)}
+    note = ("Cut to fit — this is part of the result. Narrow the question by name, "
+            "type or time and call again.")
+
+    while widest(value) > 1:
+        value = halved(value) | {"note": note}
+        text = dump(value)
+        if len(text) <= MAX_TOOL_CHARS:
+            return text
+
+    return dump({"error": "This result is too large to return. Ask something narrower.",
+                 "kind": type(value).__name__})
 
 
 # ------------------------------------------------------------------- the agent

@@ -899,3 +899,194 @@ def test_the_brief_does_not_greet_the_officer_twice_for_the_same_thing(demo):
     finally:
         loop_mod.CaseAgent._run = original
         store.clear_conversation()
+
+
+# ------------------------------- huge documents, and the context that must not
+# grow with them (2026-09-06, README §3.10)
+
+def _cdr_rows(n: int, subjects: int = 120) -> str:
+    """A CDR export of `n` calls between `subjects` numbers. Deterministic."""
+    import random
+
+    rnd = random.Random(11)
+    numbers = [f"98{10_000_000 + i * 7}" for i in range(subjects)]
+    out = ["caller,callee,timestamp,duration_sec,call_type,imei,cell_id,subscriber"]
+    for i in range(n):
+        a = rnd.randrange(subjects)
+        b = (a + 1 + rnd.randrange(subjects - 1)) % subjects
+        out.append(
+            f"{numbers[a]},{numbers[b]},2026-07-{10 + i % 18:02d} "
+            f"{i % 24:02d}:{i % 60:02d}:00,{60 + i % 300},CALL,"
+            f"{350000000000000 + i},LDH-{i % 40:03d},Subject {a}"
+        )
+    return "\n".join(out) + "\n"
+
+
+def test_ingest_is_linear_in_document_size(tmp_path):
+    """A real case file is not forty pages, and until 2026-09-06 this was
+    quadratic three times over: the overlap check rescanned every claim, the
+    date window re-sorted every date per mention, and a CSV row span re-split
+    the whole file. 27 KB of prose took 5s, 53 KB took 16s, 106 KB took 63s.
+
+    The bar is a *ratio*, not a stopwatch. Four times the document may cost
+    materially more than four times the work — but not sixteen, which is what
+    quadratic means and what this catches on any machine, however slow.
+    """
+    def ingest(name: str, rows: int) -> float:
+        case = f"test-linear-{rows}"
+        shutil.rmtree(case_dir(case), ignore_errors=True)
+        create_case(case, title="linear", exist_ok=True)
+        store, chain = CaseStore(case), CustodyChain(case)
+        path = tmp_path / name
+        path.write_text(_cdr_rows(rows), encoding="utf-8")
+        start = time.perf_counter()
+        with store:
+            ingest_file(store, chain, path, kind="cdr", filename=name)
+        elapsed = time.perf_counter() - start
+        shutil.rmtree(case_dir(case), ignore_errors=True)
+        return elapsed
+
+    small = ingest("small.csv", 1000)
+    large = ingest("large.csv", 8000)          # eight times the document
+
+    # Measured on the build machine 2026-09-06: **7.4x** with all three fixed,
+    # and **14.7x** with a single one reverted. The bar sits between them with
+    # room on both sides, and it is a ratio, so a slower machine moves both
+    # numbers together.
+    ratio = large / max(small, 0.05)
+    assert ratio < 11, (
+        f"ingest scaled {ratio:.1f}x for 8x the document ({small:.2f}s -> {large:.2f}s). "
+        "Linear is ~8x; quadratic is ~64x. Something in the ingest path is "
+        "rescanning the whole document per row again."
+    )
+
+
+def test_a_man_named_four_hundred_times_does_not_carry_four_hundred_offsets():
+    """Provenance is bounded, and the count is kept instead.
+
+    One entry per mention made every upsert re-serialise a list that grew with
+    the document — the quadratic above — and then put all of it in front of the
+    model: one node arrived as 23,000 characters. A citation needs *a* place in
+    the document; `mentions` carries the rest of the truth, and it is a more
+    useful fact than four hundred offsets.
+    """
+    case = "test-provenance"
+    shutil.rmtree(case_dir(case), ignore_errors=True)
+    create_case(case, title="provenance", exist_ok=True)
+    store, chain = CaseStore(case), CustodyChain(case)
+    para = ("Complainant Ravi Kumar stated that accused Manjit Singh called him on "
+            "9915000111 about account 50100244178. ")
+    with store:
+        ingest_text(store, chain, para * 400, filename="statement.txt")
+        node = store.get_node("person:ravi_kumar")
+        assert node is not None
+        refs = [s for s in node.sources if s["doc_id"] == "doc:statement"]
+        # A literal, deliberately. Asserting against the module's own constant
+        # is a test that passes whatever the constant is set to — which is how
+        # the first version of this passed against the unbounded code.
+        assert len(refs) <= 5, (
+            f"{len(refs)} offsets kept for one document - provenance is unbounded again"
+        )
+        assert node.attrs.get("prose_mentions", 0) > 100, "the true count was dropped, not kept"
+        assert len(refs) < node.attrs["prose_mentions"], (
+            "the count should exceed the offsets kept, or nothing was bounded"
+        )
+        # The one offset that is kept still opens on the man it names.
+        excerpt = read_source_doc(
+            CaseContext(store=store, chain=chain),
+            refs[0]["doc_id"], refs[0]["start"], refs[0]["end"])
+        assert "Ravi Kumar" in excerpt["text"]
+    shutil.rmtree(case_dir(case), ignore_errors=True)
+
+
+def test_no_tool_can_put_more_than_its_ceiling_in_front_of_the_model(tmp_path):
+    """§2.5 in one assertion: **the case grows, the context does not.**
+
+    Measured on a 3,265-node case built from a 2,000-row CDR - small, next to a
+    real one - `timeline` returned 419,224 characters in a single call and
+    nothing capped it. If the size of the case decides how much text reaches
+    the model, the case *is* the context window and this is the chatbot we say
+    it is not.
+
+    The old ceiling was a slice of the JSON string, which cut mid-object and
+    handed the model text that was not valid JSON. So this asserts both: under
+    the ceiling, and still parseable.
+    """
+    from backend.agent import tools as T
+    from backend.agent.loop import MAX_TOOL_CHARS, _json
+
+    case = "test-flood"
+    shutil.rmtree(case_dir(case), ignore_errors=True)
+    create_case(case, title="flood", exist_ok=True)
+    store, chain = CaseStore(case), CustodyChain(case)
+    path = tmp_path / "big_cdr.csv"
+    path.write_text(_cdr_rows(2000), encoding="utf-8")
+
+    with store:
+        ingest_file(store, chain, path, kind="cdr", filename="big_cdr.csv")
+        recompute(store)
+        ctx = CaseContext(store=store, chain=chain)
+        busiest = max(store.nodes(type="phone"), key=lambda n: n.id).id
+
+        results = {
+            "case_overview": T.case_overview(ctx),
+            "find_entity": T.find_entity(ctx, "98"),
+            "communities": T.communities(ctx),
+            "anomalies": T.anomalies(ctx),
+            "timeline": T.timeline(ctx),
+            "top_influencers": T.top_influencers(ctx),
+            "neighbours": T.neighbours(ctx, busiest, depth=2),
+            "chain_of_custody": T.chain_of_custody(ctx),
+        }
+        assert len(json.dumps(results["timeline"], default=str)) > 100_000, (
+            "the case is not big enough for this test to be testing anything"
+        )
+        for name, value in results.items():
+            blob = _json(value)
+            # 20,000 characters is the literal bar — about 5,000 tokens, per
+            # call, on a case this size. Asserting only against MAX_TOOL_CHARS
+            # would pass however high someone set it, which is exactly the
+            # change this guard exists to catch.
+            assert len(blob) <= 20_000, (
+                f"{name} put {len(blob):,} characters in front of the model"
+            )
+            assert len(blob) <= MAX_TOOL_CHARS, (
+                f"{name} exceeded the configured ceiling: {len(blob):,} characters"
+            )
+            json.loads(blob)  # truncation must be structural, never mid-object
+    shutil.rmtree(case_dir(case), ignore_errors=True)
+
+
+def test_betweenness_is_exact_on_a_case_that_fits_and_says_so_when_it_is_not(demo, tmp_path):
+    """The demo case is exact, and a big one is honest about being an estimate.
+
+    Exact betweenness is the whole cost of a recompute - 36.4s of 38.7s on a
+    2,685-node case, and a recompute runs after every ingest. Sampling makes it
+    2.2s. What must never happen is an estimate presented as a measurement, so
+    the sentence the officer reads says "about" when it is one.
+    """
+    from backend.analytics.metrics import BETWEENNESS_EXACT_MAX
+
+    store, _ = demo
+    meta = (store.get_analytics("metrics_meta") or {}).get("value") or {}
+    assert meta.get("projected_nodes", 0) <= BETWEENNESS_EXACT_MAX
+    assert meta.get("betweenness_estimated") is False
+    assert "about" not in top_influencers(store, limit=1)[0]["why"]
+
+    case = "test-estimated"
+    shutil.rmtree(case_dir(case), ignore_errors=True)
+    create_case(case, title="estimated", exist_ok=True)
+    store2, chain2 = CaseStore(case), CustodyChain(case)
+    path = tmp_path / "wide_cdr.csv"
+    path.write_text(_cdr_rows(3000, subjects=900), encoding="utf-8")
+    with store2:
+        ingest_file(store2, chain2, path, kind="cdr", filename="wide_cdr.csv")
+        recompute(store2)
+        meta2 = (store2.get_analytics("metrics_meta") or {}).get("value") or {}
+        assert meta2["projected_nodes"] > BETWEENNESS_EXACT_MAX
+        assert meta2["betweenness_estimated"] is True
+        top = top_influencers(store2, metric="betweenness", limit=3,
+                              node_types=("phone",))
+        assert top and top[0]["estimated"] is True
+        assert "about" in top[0]["why"], "an estimate was read out as a measurement"
+    shutil.rmtree(case_dir(case), ignore_errors=True)

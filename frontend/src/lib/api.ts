@@ -1,13 +1,10 @@
 import type {
   AgentAnswer,
   CaseBrief,
-  CaseDetail,
-  CaseDocument,
   CaseGraph,
   CaseSummary,
   ConversationTurn,
-  CustodyLog,
-  HealthReport,
+  MemoryEntry,
   NewCaseInput,
   NodeProfile,
   SourceExcerpt,
@@ -61,12 +58,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const caseUrl = (caseId: string, suffix = '') =>
   `/api/cases/${encodeURIComponent(caseId)}${suffix}`
 
-export const getHealth = () => request<HealthReport>('/api/health')
-
 export const getCases = (officer: string) =>
   request<CaseSummary[]>(`/api/cases?officer=${encodeURIComponent(officer)}`)
-
-export const getCase = (caseId: string) => request<CaseDetail>(caseUrl(caseId))
 
 export const createCase = (input: NewCaseInput) =>
   request<CaseSummary>('/api/cases', { method: 'POST', body: JSON.stringify(input) })
@@ -114,11 +107,10 @@ export const getGraph = (caseId: string, includeDocuments = false) =>
 export const getNode = (caseId: string, nodeId: string) =>
   request<NodeProfile>(caseUrl(caseId, `/nodes/${encodeURIComponent(nodeId)}`))
 
-export const getDocuments = (caseId: string) =>
-  request<CaseDocument[]>(caseUrl(caseId, '/documents'))
-
-export const getCustody = (caseId: string, limit?: number) =>
-  request<CustodyLog>(caseUrl(caseId, limit ? `/custody?limit=${limit}` : '/custody'))
+/** What the agent has concluded and what it is holding open. This is the case's,
+ *  not the conversation's — it survives the thread being cleared (§2.5). */
+export const getMemory = (caseId: string, kind?: string) =>
+  request<MemoryEntry[]>(caseUrl(caseId, kind ? `/memory?kind=${kind}` : '/memory'))
 
 export function getSource(caseId: string, docId: string, start?: number, end?: number) {
   const query = new URLSearchParams({ doc_id: docId })

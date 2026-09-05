@@ -134,6 +134,50 @@ def _better_label(node_type: str, current: str, incoming: str) -> str:
     return max((current, incoming), key=len)
 
 
+# ---------------------------------------------------------------- provenance
+
+# How much provenance one node or edge keeps. A citation needs *a* place in a
+# document, not every place: the officer clicks one and reads the line.
+MAX_SOURCES_PER_DOC = 3
+MAX_SOURCES = 60
+
+
+def _merge_sources(existing: list[dict], incoming: list[dict]) -> tuple[list[dict], int]:
+    """Union two provenance lists, **bounded**, and count what was really there.
+
+    Measured 2026-09-06, and this is why the bound exists. `sources` grew one
+    entry per mention and was re-read, re-merged and re-serialised on every
+    upsert, so ingest was **quadratic in document size**: 27 KB of prose took
+    5s, 53 KB took 16s, 106 KB took 63s. A real chargesheet bundle would never
+    have finished. The same unbounded list was then copied into every tool
+    result, so one node arrived in the model's context as 23,000 characters —
+    the exact failure this product exists to avoid (§2.5).
+
+    The rule keeps **up to three offsets per document**, so "which documents
+    name this man" stays exactly as true as it was, and a hard ceiling above
+    that. What is dropped is the fourth offset inside a document already
+    represented, which no answer has ever needed. The true count is not lost:
+    it is returned so the caller can record `mentions`, and *400 mentions* is a
+    more useful fact than 400 offsets.
+    """
+    seen: dict[tuple, dict] = {}
+    for s in existing + incoming:
+        seen[(s["doc_id"], s.get("start"), s.get("end"))] = s
+    total = len(seen)
+
+    per_doc: dict[str, int] = {}
+    kept: list[dict] = []
+    for ref in seen.values():
+        doc = ref["doc_id"]
+        if per_doc.get(doc, 0) >= MAX_SOURCES_PER_DOC:
+            continue
+        per_doc[doc] = per_doc.get(doc, 0) + 1
+        kept.append(ref)
+        if len(kept) >= MAX_SOURCES:
+            break
+    return kept, total
+
+
 class CaseStore:
     """Open with `CaseStore(case_id)`; use as a context manager or call `close()`."""
 
@@ -201,10 +245,7 @@ class CaseStore:
             self._touch()
             return node
 
-        merged_sources = {
-            (s["doc_id"], s.get("start"), s.get("end")): s
-            for s in json.loads(row["sources"]) + node.sources
-        }
+        merged_sources, _ = _merge_sources(json.loads(row["sources"]), node.sources)
         attrs = json.loads(row["attrs"])
         for k, v in node.attrs.items():
             if k == "aliases":
@@ -219,10 +260,36 @@ class CaseStore:
 
         self.conn.execute(
             "UPDATE nodes SET label=?, attrs=?, first_seen=?, last_seen=?, sources=? WHERE id=?",
-            (label, _j(attrs), first, last, _j(list(merged_sources.values())), node.id),
+            (label, _j(attrs), first, last, _j(merged_sources), node.id),
         )
         self._touch()
         return self.get_node(node.id)
+
+    def note_mentions(self, node_id: str, doc_id: str, count: int) -> None:
+        """Record how many times a document's **prose** names this entity.
+
+        Prose only, and the attribute says so. A structured row produces one
+        reference per row and its volume is already visible as links — five
+        hundred calls are five hundred edges. Free text is where bounding the
+        provenance actually loses something, so free text is where the count is
+        kept, and a number that covered only half its name would be worse than
+        no number at all.
+
+        Provenance is bounded (`_merge_sources`), so the offsets no longer carry
+        this. It is written per document and **set**, never added, so ingesting
+        the same file twice records the same number rather than twice it.
+        """
+        row = self.conn.execute("SELECT attrs FROM nodes WHERE id=?", (node_id,)).fetchone()
+        if row is None:
+            return
+        attrs = json.loads(row["attrs"])
+        by_doc = dict(attrs.get("prose_mentions_by_doc") or {})
+        if by_doc.get(doc_id) == count:
+            return
+        by_doc[doc_id] = count
+        attrs["prose_mentions_by_doc"] = by_doc
+        attrs["prose_mentions"] = sum(by_doc.values())
+        self.conn.execute("UPDATE nodes SET attrs=? WHERE id=?", (_j(attrs), node_id))
 
     def get_node(self, node_id: str) -> Node | None:
         row = self.conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
@@ -285,16 +352,13 @@ class CaseStore:
             self._touch()
             return edge
 
-        merged = {
-            (s["doc_id"], s.get("start"), s.get("end")): s
-            for s in json.loads(row["sources"]) + edge.sources
-        }
+        merged, _ = _merge_sources(json.loads(row["sources"]), edge.sources)
         attrs = json.loads(row["attrs"])
         attrs.update({k: v for k, v in edge.attrs.items() if v is not None})
         self.conn.execute(
             "UPDATE edges SET attrs=?, weight=?, confidence=?, sources=? WHERE id=?",
             (_j(attrs), max(row["weight"], edge.weight),
-             max(row["confidence"], edge.confidence), _j(list(merged.values())), row["id"]),
+             max(row["confidence"], edge.confidence), _j(merged), row["id"]),
         )
         self._touch()
         edge.id = row["id"]

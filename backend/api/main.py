@@ -264,8 +264,11 @@ def get_node(case_id: str, node_id: str) -> dict:
             "edges": [e.to_dict() for e in edges],
             "neighbours": [n.to_dict() for n in
                            (store.get_node(i) for i in sorted(neighbour_ids)) if n],
-            "documents": [store.document(s["doc_id"]) for s in node.sources
-                          if store.document(s["doc_id"])],
+            # Deduplicated: `sources` holds an offset per mention, so mapping
+            # it straight to documents listed the same FIR three times and the
+            # interface read "out of 12 documents" on a case that has nine.
+            "documents": [d for d in (store.document(i) for i in
+                                      dict.fromkeys(s["doc_id"] for s in node.sources)) if d],
         }
 
 

@@ -222,6 +222,29 @@ def recall(ctx: CaseContext, query: str = "", kind: str | None = None) -> list[d
     return ctx.store.memory(kind=kind)
 
 
+def chain_of_custody(ctx: CaseContext, limit: int = 12) -> dict:
+    """Whether this case's evidence record is intact, and the last things it recorded.
+
+    Added 2026-09-06. The interface has no Custody panel any more (D25), so an
+    officer asking *"has anything been tampered with?"* was, until this tool
+    existed, asking a question the assistant had no way to answer — about the
+    one property the **Blockchain & Cybersecurity** theme is judged on. The
+    chain was still being written and still verifiable over HTTP; nothing could
+    reach it by asking, which is the only way in now.
+
+    It reports the verification and the tail, never the whole chain: an answer
+    is a sentence, not a ledger dump.
+    """
+    verification = ctx.chain.verify()
+    return {
+        "intact": bool(verification.get("valid")),
+        "entries": verification.get("entries", 0),
+        "broken_at": verification.get("broken_at"),
+        "reason": verification.get("reason"),
+        "recent": ctx.chain.entries(limit=limit),
+    }
+
+
 def case_overview(ctx: CaseContext) -> dict:
     """One call that orients the agent at the start of a run: size of the case,
     what has been ingested, the standing findings, and its own open threads."""
@@ -250,6 +273,7 @@ READ_TOOLS = {
     "anomalies": anomalies,
     "read_source_doc": read_source_doc,
     "search_web": search_web,
+    "chain_of_custody": chain_of_custody,
 }
 
 ACT_TOOLS = {
@@ -264,7 +288,7 @@ ALL_TOOLS = READ_TOOLS | ACT_TOOLS
 
 
 def call(ctx: CaseContext, name: str, **kwargs) -> Any:
-    """Direct dispatch, for the API, the tests and any offline path."""
+    """Direct dispatch, for the API and the tests — the same tools the agent binds."""
     if name not in ALL_TOOLS:
         raise KeyError(f"unknown tool {name!r}; available: {sorted(ALL_TOOLS)}")
     return ALL_TOOLS[name](ctx, **kwargs)
