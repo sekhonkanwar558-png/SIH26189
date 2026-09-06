@@ -17,7 +17,7 @@ the second one**.
 
 ```bash
 python -m data.synthetic.generate --case demo-114   # rebuild the case, clean
-python -m pytest tests -q                           # 37 passed
+python -m pytest tests -q                           # 38 passed
 uvicorn backend.api.main:app --port 8000            # terminal 1
 pnpm --dir frontend dev                             # terminal 2
 ```

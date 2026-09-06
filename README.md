@@ -817,7 +817,7 @@ pip install -r requirements.txt
 cp .env.example .env            # then put the key in .env — see §8
 
 python -m data.synthetic.generate --case demo-114   # build the demo case (§9)
-python -m pytest tests -q                           # 37 tests, all should pass
+python -m pytest tests -q                           # 38 tests, all should pass
 uvicorn backend.api.main:app --reload               # http://127.0.0.1:8000/docs
 ```
 
@@ -963,14 +963,14 @@ The failure mode of a six-person hackathon is everyone building alone until hour
 | Agent — 9 read tools + 5 act tools, tool loop, §5.3 contract, self-verification | **built and run live** (09-06) — nine real calls, every citation verified against the graph |
 | **Tool results — bounded** | **built, tested** (09-06) — nothing can put more than 12,000 characters in front of the model, whatever the case holds. D30 |
 | **Prompt caching** | **built and verified live** (09-06) — two explicit breakpoints plus top-level automatic caching on the tool loop. Measured across nine real calls: **2 input tokens at full price on every one**, the rest served from cache. **$0.0235 a question**, down from ~$0.10. D42 |
-| Custody — hash chain, tamper detection, **reachable by asking** (D33) | **built, tested** |
+| Custody — hash chain, tamper detection, **reachable by asking** (D33) | **built, tested, and now run live** (09-06 night) — the §9.3 beat performed end to end: chain broken, asked in the chat, **it named entry 2 and why**, restored byte-identical |
 | API — every endpoint in §5.6 | **built**, returning real data |
 | Demo case — generator + planted ground truth | **built, tested** — **125 nodes: 116 entities and 9 documents**, 1,148 links. The interface says *116 entities · 1,148 links · 9 documents*, because a document is a node but it is not an entity and an upload reports the two separately. |
 | **Front end — one chat** | **built, driven in a browser against `demo-114` (2026-09-06)**: the thread, the evidence trail, the brain panel with the route lit hop by hop, upload by paperclip and by drag-and-drop, and the brain line reporting what each document added |
 | **The brain panel — interactive** | **rebuilt 2026-09-06, and driven again the same evening.** Opens on a readable core laid out into the shape of the panel, every node opens on a click and **closes on the next one**, nodes are draggable, hover names them, and the key at the foot filters by type. Reached by its own **Brain** control. D34–D40 |
 | `docs/demo-script.md` | **written, current with the pivot** |
 
-**`python -m pytest tests -q` → 37 passed.** What that covers, beyond the §9.1 plants:
+**`python -m pytest tests -q` → 38 passed** (re-run 2026-09-06 night, 78s). What that covers, beyond the §9.1 plants:
 
 - The kingpin is named in **no report** and the system **leads with him** (§9.2 query 2).
 - Ravi reaches the Delhi account **through the tower**, and no call between the two numbers exists, so the system cannot claim contact (§9.2 query 1).
@@ -987,7 +987,9 @@ The failure mode of a six-person hackathon is everyone building alone until hour
 
 **Not done, and honest about it:**
 
-- **The agent loop has run against the live API — nine calls on 2026-09-06 evening.** The key is **Kanwar's own, with about $3 on it** (§8), which is a demo budget rather than a development one; **$0.21 of it is spent.** What was verified live: it refuses to invent a document that does not exist; it distinguishes proximity from contact unprompted; it leads with the hidden-broker finding; it synthesises across bank, CDR and criminal-history in one answer; and **clearing the thread and re-asking returns the same finding with the same citations** — §2.5's claim, demonstrated. **Still never run live: the custody/tamper beat of §9.3**, which is the theme the round is judged on. Run that one before the 8th.
+- **The agent loop has run against the live API — nine calls on 2026-09-06 evening.** The key is **Kanwar's own, with about $3 on it** (§8), which is a demo budget rather than a development one; **$0.21 of it is spent.** What was verified live: it refuses to invent a document that does not exist; it distinguishes proximity from contact unprompted; it leads with the hidden-broker finding; it synthesises across bank, CDR and criminal-history in one answer; and **clearing the thread and re-asking returns the same finding with the same citations** — §2.5's claim, demonstrated. **The custody/tamper beat of §9.3 has now run too** — see the bullet below; there is nothing left in the demo that has never been performed.
+- **The custody beat ran live on the night of 2026-09-06, and it passed.** The chain was broken at entry 2, the question was typed in the chat, and the answer named **entry #2** and the reason — *"the recorded content no longer matches its stored hash… altered after it was logged, not new evidence added"* — then the chain was restored to a byte-identical head. Two things worth knowing that only a live run showed. It **refused to over-claim**: *"I don't have the actual content of that broken entry #2 in front of me… so I can't yet tell you which document, edge or conclusion it altered"*, where inventing a filename was the easy failure. And it exercised a path nothing else had — **an answer that cites zero graph nodes** — without erroring or being branded unverified. One overreach, said here because nothing else will say it: the answer claims the later entries *"all sit correctly on the hash chain"*, which **no tool told it** — `verify()` stops at the first break and never checks 3–61. It is true by luck, not by evidence.
+- **The cost figures in this file are floors, not the bill.** `_log_usage` (`loop.py:854`) runs **once per question**, on the final message the SDK's `tool_runner` returns after the whole loop has finished — so each row in `output/cost.jsonl` is the **last request** of that question, not the sum over its iterations, exactly as its own docstring warns. The ledger reads **$0.2288 across 10 rows**; the real spend against the ~$3 is higher by however many iterations each question took, and **nothing on this machine knows that number.** Read the Anthropic console for the true figure before the 8th — on this budget a 2–3× error matters.
 - **A 50,000-row CDR takes about a minute and a half** to ingest and recompute. Linear and honest, but not instant, and nothing in the interface tells the officer how long a large file will take.
 - **Nothing in the product reaches the network except the model call.** The web tool is deleted (D41): the officer browses himself and hands over what he finds.
 - **A scanned PDF is announced, not read.** No OCR; whether scans are in scope is still §13's question.
@@ -1123,7 +1125,15 @@ The failure mode of a six-person hackathon is everyone building alone until hour
   - **The interface**: his message now appears the instant he presses send (a 40–50s wait used to look like nothing had happened); the graph's "what it has worked out" panel is gone — he asks instead.
   - **`output/cost.jsonl`** (gitignored) records tokens and an estimated dollar figure for every call, because the console line scrolls away and lives in whatever window uvicorn was started in.
   - **38 tests**, every new guard mutation-checked. Two of them were asleep on the first attempt and had to be rewritten — one asserted on a section heading that survives when the data behind it is deleted.
-  - **Still never run live: the custody/tamper beat (§9.3)**, which is the theme the round is judged on.
+  - **Still never run live: the custody/tamper beat (§9.3)**, which is the theme the round is judged on. *(Closed the same night — see the entry below.)*
+
+- **2026-09-06, night (Kanwar + Claude)** — **a full readiness pass before submission work starts, and the last unperformed beat performed.** No code changed; everything below is verification, and two of the numbers in this file were wrong. What the next agent needs to know:
+  - **The custody/tamper beat ran live and passed** — the last part of the demo that had never been performed, and the one the *Blockchain & Cybersecurity* theme is judged on. Chain broken at entry 2, asked in the chat, and the answer **named entry #2 and the reason**. It also refused to name the document it could not see, and it exercised a path nothing else had: **an answer citing zero graph nodes**. One ungrounded claim in it, recorded in §11 — it asserts the later entries verify, which `verify()` never checked.
+  - **`pytest` → 38 passed, not 37.** The count was stale in three places — §7, §11 and `docs/demo-script.md`'s pre-flight block, which is the one a presenter reads twenty minutes before the round. The 38th arrived with D46 in the previous commit and the counts were never moved.
+  - **The cost figures in this file are floors.** `_log_usage` runs once per question on the final message, so `output/cost.jsonl` records the **last request**, not the sum over the tool loop's iterations. Ledger reads **$0.2288 / 10 rows**; the true spend is higher and unknown here. **Read the console before the 8th.**
+  - **Re-verified, nothing moved:** `tsc`/`oxlint`/`build` clean; the API serves `demo-114` at 125 nodes / 1,148 edges / 9 documents; the interface driven in a browser — thread, graph fan-out (28 of 116 on a click), entity profile at *24 links · in 7 of 9 documents*, and a citation opening to the exact passage. Custody restored byte-identical after the test (`head efc7a1c0…`, 61 entries).
+  - **Confirmed by grep, because it is the promise the product rests on: nothing runs on its own.** The chain has one write path and six call sites, all downstream of an officer uploading or asking; `verify()` never writes. No background task, thread, scheduler or startup hook in the backend; no `refetchInterval` anywhere in the front end. The four automatic queries — cases, conversation, graph, health — cost nothing, and `ask` is a mutation.
+  - **Known and deliberately not fixed** (Kanwar's call): three empty rehearsal cases sit in the sidebar, and §8 still names the wrong key holder — it is Kanwar's key, not Gurpartap's, as §11 and the 09-06 entry above both say.
 
 Append one line per session. What you built · what you changed in this file · what the next agent needs to know.
 
