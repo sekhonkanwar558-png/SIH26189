@@ -37,8 +37,15 @@
   --color-danger-soft: #fdf2f2;
 
   /* One curve, used by everything that moves. Motion that disagrees with
-     itself reads as several products stitched together. */
+     itself reads as several products stitched together.
+
+     It is also Tailwind's default, so a bare `transition` anywhere in the
+     product picks it up — the rule is enforced by the theme rather than by
+     remembering to type it, which is the only way a rule like this survives
+     four people and a deadline. */
   --ease-out-soft: cubic-bezier(0.22, 0.68, 0.24, 1);
+  --default-transition-timing-function: var(--ease-out-soft);
+  --default-transition-duration: 180ms;
 }
 
 :root {
@@ -180,6 +187,39 @@ textarea {
   animation: shikonye-slide-in 380ms var(--ease-out-soft) both;
 }
 
+/* The brain arriving. It comes in from its own edge rather than appearing,
+   because a panel that blinks into existence reads as a page change and this
+   is the same page with more of it visible. */
+@keyframes shikonye-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.panel-in {
+  animation: shikonye-panel-in 340ms var(--ease-out-soft) both;
+}
+
+/* The canvas fades up once the layout has settled, so the officer never sees
+   the half-second in which a force layout is still arguing with itself. */
+@keyframes shikonye-canvas-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.canvas-in {
+  animation: shikonye-canvas-in 420ms var(--ease-out-soft) both;
+}
+
 @keyframes shikonye-pulse {
   0%,
   100% {
@@ -217,10 +257,19 @@ textarea {
   animation: shikonye-grew 700ms var(--ease-out-soft) both;
 }
 
+/* Prose is ragged rather than widowed. Costs nothing, and an answer that ends
+   on one orphaned word looks unfinished in a way the officer cannot name. */
+p,
+blockquote {
+  text-wrap: pretty;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rise,
   .settle,
   .slide-in,
+  .panel-in,
+  .canvas-in,
   .grew,
   .thinking-dot {
     animation: none;

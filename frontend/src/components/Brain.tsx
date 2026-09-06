@@ -8,8 +8,10 @@ import {
   Minus,
   Plus,
   RotateCcw,
+  Shapes,
   X,
 } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getMemory, getNode, getSource } from '../lib/api'
 import type {
@@ -85,6 +87,34 @@ const TYPE_STYLE: Record<NodeType, { shape: string; tone: string; word: string }
 
 const styleFor = (type: string) =>
   TYPE_STYLE[type as NodeType] ?? { shape: 'ellipse', tone: '#6b6b76', word: type }
+
+/**
+ * The key's own drawing of a shape — the same nine the canvas uses.
+ *
+ * A diagram whose vocabulary is shape needs somewhere the vocabulary is
+ * written down, and a coloured square beside the word would be a key to a
+ * language the picture is not speaking.
+ */
+function Glyph({ shape, tone }: { shape: string; tone: string }) {
+  const body: Record<string, ReactNode> = {
+    ellipse: <circle cx="6" cy="6" r="4.8" />,
+    'round-rectangle': <rect x="1.2" y="2.2" width="9.6" height="7.6" rx="2.4" />,
+    rectangle: <rect x="1.2" y="2.6" width="9.6" height="6.8" />,
+    hexagon: <polygon points="6,1 10.8,3.6 10.8,8.4 6,11 1.2,8.4 1.2,3.6" />,
+    pentagon: <polygon points="6,1 11,4.7 9.1,10.6 2.9,10.6 1,4.7" />,
+    rhomboid: <polygon points="3.2,2.2 11,2.2 8.8,9.8 1,9.8" />,
+    diamond: <polygon points="6,0.9 11.1,6 6,11.1 0.9,6" />,
+    barrel: <rect x="1" y="2.2" width="10" height="7.6" rx="3.8" ry="1.6" />,
+    'cut-rectangle': (
+      <polygon points="3.2,2.2 8.8,2.2 10.8,4.2 10.8,7.8 8.8,9.8 3.2,9.8 1.2,7.8 1.2,4.2" />
+    ),
+  }
+  return (
+    <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden fill={tone} fillOpacity={0.92}>
+      {body[shape] ?? body.ellipse}
+    </svg>
+  )
+}
 
 /** How many entities the brain opens on when nobody has asked it anything. */
 const SEED = 26
@@ -195,12 +225,37 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
   const cyRef = useRef<cytoscape.Core | null>(null)
   const shown = useRef<Set<string>>(new Set())
 
+  /**
+   * Who brought each node onto the screen — one owner per node, the first
+   * entity that was opened to reach it.
+   *
+   * This is what makes an expansion reversible. Closing an entity removes the
+   * nodes it owns and, through them, whatever they own, so a graph the officer
+   * has opened four levels into can be put back one click at a time instead of
+   * only by starting again. Without an owner the same operation is a guess.
+   */
+  const addedBy = useRef<Map<string, string>>(new Map())
+
   const [selected, setSelected] = useState<string | null>(null)
   const [held, setHeld] = useState<{ id: string; hidden: number } | null>(null)
-  const [depth, setDepth] = useState(0)
+  /** How many entities are open — the reset control's whole reason to exist. */
+  const [opened, setOpened] = useState(0)
   /** How many entities are on screen. Mirrors `shown`, which is a ref because
    *  the expand handler writes it — a ref read during render is a stale read. */
   const [drawn, setDrawn] = useState(0)
+  /** What the cursor is over. A dot with no room for a label still has to be
+   *  able to say what it is, and the officer should not have to click to find
+   *  out that he does not want to. */
+  const [hover, setHover] = useState<
+    { x: number; y: number; label: string; word: string; links: number } | null
+  >(null)
+  /** A type the officer has picked out of the key. Everything else fades; the
+   *  case answers "where are the accounts in this?" without a query language. */
+  const [only, setOnly] = useState<NodeType | null>(null)
+  /** The key starts open. Shape is the picture's whole vocabulary and a
+   *  vocabulary nobody is given is a picture nobody can read; it folds away for
+   *  the officer who has learned it. */
+  const [showKey, setShowKey] = useState(true)
 
   // ------------------------------------------------------------- the case, indexed
 
@@ -256,9 +311,16 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
             data: {
               id,
               label: node.label,
+              type: node.type,
+              word: face.word,
               shape: face.shape,
               tone: face.tone,
               size,
+              // Hovering grows the node a little. Cytoscape cannot scale a
+              // drawn node, so the larger size is carried in the data and a
+              // class switches to it — which is why the transition list
+              // includes width and height.
+              grown: size + 5,
               lit: lit.has(id) ? 1 : 0,
               // A label on every dot is a label on nothing, and a phone number
               // written across a person's name is worse than no label at all.
@@ -368,10 +430,13 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
     }
 
     shown.current = ids
+    addedBy.current = new Map()
     setDrawn(ids.size)
     setSelected(null)
     setHeld(null)
-    setDepth(0)
+    setOpened(0)
+    setHover(null)
+    setOnly(null)
 
     cy.batch(() => {
       cy.elements().remove()
@@ -390,24 +455,53 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
     cy.layout({
       name: 'cose',
       animate: false,
-      nodeRepulsion: () => 14000,
-      idealEdgeLength: () => 78,
-      nodeOverlap: 18,
-      padding: 48,
+      // Laid out into the shape of the panel it is going into. Without this the
+      // force layout composes on a square and the fit then scales that square
+      // down to the width of a tall narrow panel — a small graph marooned in
+      // the middle with empty bands above and below it, which is most of the
+      // reason the picture read as thin.
+      boundingBox: { x1: 0, y1: 0, w: cy.width(), h: cy.height() },
+      nodeRepulsion: () => 18000,
+      idealEdgeLength: () => 80,
+      // The phones and accounts of a call-record case all connect to the same
+      // few people, so they land on top of each other unless told not to.
+      nodeOverlap: 45,
+      gravity: 1,
+      numIter: 1200,
+      componentSpacing: 100,
+      padding: 40,
       randomize: true,
     } as cytoscape.LayoutOptions).run()
 
+    // Fitted here, synchronously, so the *first* frame the officer sees is
+    // already composed — no jump from wherever the force layout happened to
+    // leave things to where they belong.
+    //
+    // The obvious alternative was to hold the canvas at `opacity: 0` and fade
+    // it in once the frame callback had fitted it. That is prettier and it is
+    // a trap: it makes visibility depend on a frame arriving, and a graph whose
+    // *only* failure mode is "perfectly correct and completely invisible" is
+    // the exact bug this panel has now produced twice. Composing the first
+    // frame correctly needs no reveal at all.
+    cy.resize()
+    cy.fit(undefined, 50)
+
     requestAnimationFrame(() => {
-      if (!cyRef.current) return
+      // The core this frame belongs to, not merely *a* core: React mounts this
+      // component twice in development, and the first instance's frame callback
+      // arrived after that instance had been destroyed — it saw a live `cyRef`
+      // and called a dead cytoscape, which threw before the opening fit ever
+      // ran. Comparing identity is what makes a callback belong to its own graph.
+      if (cyRef.current !== cy) return
       cy.resize()
       // `resize()` alone returns early when the box has not changed, so on the
       // first open nothing is ever drawn — the graph appeared only if the
       // window happened to be resized. This is what lands the opening frame.
       cy.forceRender()
-      cy.animate(
-        { fit: { eles: cy.elements(), padding: 56 } },
-        { duration: 420, easing: 'ease-out-cubic' },
-      )
+      // A second fit, once the panel has certainly been laid out: cytoscape can
+      // measure a container the browser has not sized yet, and the fit above
+      // would then be composed against the wrong box.
+      cy.fit(undefined, 50)
     })
   }, [path, ordered, opening, index, elementsFor])
 
@@ -454,7 +548,13 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
       centre.y /= n
       const away = Math.atan2(at.y - centre.y, at.x - centre.x) || 0
 
-      for (const nid of taking) shown.current.add(nid)
+      for (const nid of taking) {
+        shown.current.add(nid)
+        // First one in owns it. A node reached again later from somewhere else
+        // keeps its original owner, so closing that owner takes it away and
+        // closing the other one does not — one node, one home.
+        if (!addedBy.current.has(nid)) addedBy.current.set(nid, id)
+      }
 
       const lit = new Set(path)
       const hops = new Set<string>()
@@ -493,22 +593,40 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
             },
             style: { opacity: 1 },
           },
-          { duration: 460, easing: 'ease-out-cubic' },
+          {
+            duration: 460,
+            easing: 'ease-out-cubic',
+            // An animated style is a *bypass*, and a bypass outranks every
+            // class rule for as long as it stands. Left in place, `opacity: 1`
+            // would quietly beat `.dim` and `.faded` for ever, so hovering and
+            // the type key would stop working on anything ever expanded — and
+            // only on that. Handing the style back is what keeps them honest.
+            complete: () => el.removeStyle('opacity'),
+          },
         )
       })
 
       // Edges arrive with the nodes they belong to rather than snapping in first.
-      cy.edges().filter((el) => Number(el.style('opacity')) === 0 || !edgesOn.has(el.id()))
-        .style({ opacity: 0 })
-        .animate({ style: { opacity: 1 } }, { duration: 460, easing: 'ease-out-cubic', queue: false })
+      const arriving = cy
+        .edges()
+        .filter((el) => Number(el.style('opacity')) === 0 || !edgesOn.has(el.id()))
+      arriving.style({ opacity: 0 }).animate(
+        { style: { opacity: 1 } },
+        {
+          duration: 460,
+          easing: 'ease-out-cubic',
+          queue: false,
+          complete: () => arriving.removeStyle('opacity'),
+        },
+      )
 
       parent.addClass('opened')
       setDrawn(shown.current.size)
       setHeld(hidden > 0 ? { id, hidden } : null)
-      setDepth((d) => d + 1)
+      setOpened(cy.nodes('.opened').length)
 
       window.setTimeout(() => {
-        if (!cyRef.current) return
+        if (cyRef.current !== cy) return
         // The entity panel below has opened by now and taken the canvas with
         // it; fitting before that put the new nodes underneath it.
         cy.resize()
@@ -521,6 +639,75 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
     [index, path, ordered, elementsFor],
   )
 
+  /**
+   * Close an entity again — and everything that came in behind it.
+   *
+   * Opening was one-way until now: four clicks in, the only way back was to
+   * start the graph over, so the officer stopped clicking. A second click on an
+   * open entity folds it away, its children and their children with it, back
+   * into the node he opened. What he did not open is never touched, so the
+   * route an answer rests on cannot be collapsed out from under him.
+   */
+  const collapse = useCallback(
+    (id: string) => {
+      const cy = cyRef.current
+      if (!cy) return
+      const parent = cy.getElementById(id)
+      if (parent.empty()) return
+
+      const doomed: string[] = []
+      const walk = (owner: string) => {
+        for (const [child, by] of addedBy.current) {
+          if (by === owner && !doomed.includes(child)) {
+            doomed.push(child)
+            walk(child)
+          }
+        }
+      }
+      walk(id)
+
+      parent.removeClass('opened')
+      if (doomed.length === 0) {
+        setOpened(cy.nodes('.opened').length)
+        setHeld(null)
+        return
+      }
+
+      const gone = new Set(doomed)
+      const stillOpen = cy
+        .nodes('.opened')
+        .filter((el) => !gone.has(el.id()) && el.id() !== id).length
+
+      const at = parent.position()
+      for (const nid of doomed) {
+        const el = cy.getElementById(nid)
+        if (el.empty()) continue
+        el.animate(
+          { position: { x: at.x, y: at.y }, style: { opacity: 0 } },
+          { duration: 260, easing: 'ease-in-cubic' },
+        )
+        shown.current.delete(nid)
+        addedBy.current.delete(nid)
+      }
+
+      setDrawn(shown.current.size)
+      setHeld(null)
+      setOpened(stillOpen)
+      setHover(null)
+      if (selected && gone.has(selected)) setSelected(null)
+
+      window.setTimeout(() => {
+        if (cyRef.current !== cy) return
+        // Removing a node takes its edges with it, so nothing is left drawn
+        // between a thing and nothing.
+        cy.batch(() => {
+          for (const nid of doomed) cy.getElementById(nid).remove()
+        })
+      }, 280)
+    },
+    [selected],
+  )
+
   // ------------------------------------------------------------------- mount
 
   /** The tap handler is bound once but must always call the current `open`. */
@@ -529,12 +716,39 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
     openRef.current = open
   }, [open])
 
+  const collapseRef = useRef(collapse)
+  useEffect(() => {
+    collapseRef.current = collapse
+  }, [collapse])
+
   useEffect(() => {
     if (!host.current) return
 
     const cy = cytoscape({
       container: host.current,
       style: ([
+        /**
+         * Cytoscape's own idea of feedback, switched off.
+         *
+         * Out of the box it answers a press with a translucent grey disc —
+         * under the node, and a second one under the cursor when the canvas
+         * itself is dragged. On a near-colourless product it is the loudest
+         * thing on screen and it is decoration: it says "you pressed", which
+         * the officer already knows, and covers the thing he pressed to say it.
+         * Everything below replaces it with feedback that follows the shape it
+         * belongs to.
+         */
+        {
+          selector: 'core',
+          style: {
+            'active-bg-opacity': 0,
+            'active-bg-size': 0,
+            'selection-box-opacity': 0,
+            'selection-box-border-width': 0,
+            'outside-texture-bg-opacity': 0,
+          },
+        },
+        { selector: 'node:active, edge:active', style: { 'overlay-opacity': 0 } },
         {
           selector: 'node',
           style: {
@@ -544,10 +758,13 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
             width: 'data(size)',
             height: 'data(size)',
             'border-width': 0,
-            'border-color': '#ffffff',
+            'border-color': INK,
+            'border-opacity': 0,
             label: '',
-            'transition-property': 'background-color, border-width, width, height, opacity',
-            'transition-duration': 180,
+            'transition-property':
+              'background-color, border-width, border-opacity, width, height, opacity',
+            'transition-duration': 160,
+            'transition-timing-function': 'ease-out-sine',
           },
         },
         {
@@ -583,6 +800,10 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
             'text-background-shape': 'roundrectangle',
           },
         },
+        // Under the cursor: it grows a little, takes a soft ring in its own
+        // outline, and says its name. The ring is a border rather than an
+        // overlay disc so it follows the shape — a circle drawn around a
+        // hexagon is a second shape competing with the one that carries meaning.
         {
           selector: 'node.hot',
           style: {
@@ -593,13 +814,45 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
             'text-background-opacity': 0.95,
             'text-background-padding': '3px',
             'text-background-shape': 'roundrectangle',
+            width: 'data(grown)',
+            height: 'data(grown)',
             'border-width': 3,
-            'border-color': '#ffffff',
+            'border-color': INK,
+            'border-opacity': 0.16,
             'z-index': 20,
           },
         },
-        { selector: 'node.picked', style: { 'border-width': 3, 'border-color': INK, 'z-index': 30 } },
+        {
+          selector: 'node.picked',
+          style: {
+            'border-width': 2.5,
+            'border-color': INK,
+            'border-opacity': 0.9,
+            'z-index': 30,
+          },
+        },
+        // Held in the hand. The same ring, darker, and it keeps the hover's
+        // size so nothing jumps at the moment it is picked up.
+        {
+          selector: 'node:grabbed',
+          style: {
+            width: 'data(grown)',
+            height: 'data(grown)',
+            'border-width': 3,
+            'border-color': INK,
+            'border-opacity': 0.45,
+            'z-index': 40,
+          },
+        },
         { selector: '.dim', style: { opacity: 0.12 } },
+        // The type key's own fade. A separate class from `.dim` on purpose:
+        // leaving a hover clears `.dim` from everything, and a picked type must
+        // survive the officer moving his mouse.
+        { selector: '.faded', style: { opacity: 0.07 } },
+        {
+          selector: 'node.flag',
+          style: { 'border-width': 2, 'border-color': INK, 'border-opacity': 0.3, 'z-index': 15 },
+        },
         {
           selector: 'edge',
           style: {
@@ -619,19 +872,32 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
       minZoom: 0.15,
       maxZoom: 3.5,
       wheelSensitivity: 0.22,
-      // The graph is a thing to read, not a thing to rearrange. Panning and
-      // zooming are his; dragging a node somewhere meaningless is not.
-      autoungrabify: true,
+      // Nodes move. This reverses the original decision — that the graph is to
+      // be read and not rearranged — on his instruction, and the reasoning that
+      // replaces it is better: a force layout puts two names on top of each
+      // other often enough, and the officer's own arrangement of a network is
+      // part of how he thinks about it. Nothing is destroyed by moving a node,
+      // the reset control puts it back, and the alternative was a picture that
+      // did not answer the hand.
+      autoungrabify: false,
       boxSelectionEnabled: false,
+      // Cytoscape keeps a selection of its own, with its own styling, on top of
+      // the one this panel maintains. Two selections on one graph is one too
+      // many; `.picked` is ours and this turns the other one off.
+      autounselectify: true,
     })
     cyRef.current = cy
 
+    // One click opens an entity; the same click again closes it. A graph you
+    // can only open is one the officer stops clicking after the fourth level.
     cy.on('tap', 'node', (event) => {
       const node = event.target as cytoscape.NodeSingular
+      const wasOpen = node.hasClass('opened')
       cy.nodes().removeClass('picked')
       node.addClass('picked')
       setSelected(node.id())
-      openRef.current(node.id())
+      if (wasOpen) collapseRef.current(node.id())
+      else openRef.current(node.id())
     })
 
     cy.on('tap', (event) => {
@@ -642,18 +908,62 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
       }
     })
 
+    const tip = (node: cytoscape.NodeSingular) => {
+      const at = node.renderedPosition()
+      setHover({
+        x: at.x,
+        y: at.y - node.renderedHeight() / 2 - 10,
+        label: String(node.data('label') ?? ''),
+        word: String(node.data('word') ?? ''),
+        links: node.connectedEdges().length,
+      })
+    }
+
     cy.on('mouseover', 'node', (event) => {
       const node = event.target as cytoscape.NodeSingular
       const keep = node.closedNeighborhood()
       cy.elements().difference(keep).addClass('dim')
       node.addClass('hot')
       keep.edges().addClass('hot')
-      if (host.current) host.current.style.cursor = 'pointer'
+      // What it is, without having to click to find out — and the count is the
+      // case's own argument about whether this one is worth opening.
+      tip(node)
+      if (host.current) host.current.style.cursor = 'grab'
     })
 
     cy.on('mouseout', 'node', () => {
       cy.elements().removeClass('dim hot')
+      setHover(null)
       if (host.current) host.current.style.cursor = 'default'
+    })
+
+    // A label pinned to a point in the canvas is wrong the moment the canvas
+    // moves under it, so it goes rather than lies.
+    cy.on('grab', () => {
+      setHover(null)
+      if (host.current) host.current.style.cursor = 'grabbing'
+    })
+    cy.on('free', () => {
+      if (host.current) host.current.style.cursor = 'grab'
+    })
+    cy.on('pan zoom', () => setHover(null))
+
+    // Dragging the canvas is dragging the canvas, and the cursor says so.
+    cy.on('mousedown', (event) => {
+      if (event.target === cy && host.current) host.current.style.cursor = 'grabbing'
+    })
+    cy.on('mouseup', (event) => {
+      if (event.target === cy && host.current) host.current.style.cursor = 'default'
+    })
+
+    // Double-click anywhere empty to put the whole thing back on screen. Four
+    // expansions in, the graph is usually somewhere off the left edge.
+    cy.on('dbltap', (event) => {
+      if (event.target !== cy) return
+      cy.animate(
+        { fit: { eles: cy.elements(), padding: 56 } },
+        { duration: 460, easing: 'ease-out-cubic' },
+      )
     })
 
     // Cytoscape sets `position: relative` on its container at runtime, which
@@ -673,6 +983,27 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
   useEffect(() => {
     paint()
   }, [paint])
+
+  /**
+   * Picking a type out of the key.
+   *
+   * `drawn` is in the dependencies because expanding brings new nodes in, and a
+   * type the officer picked five clicks ago has to hold for everything that has
+   * arrived since — otherwise the key means "what was on screen when I pressed
+   * it", which is not a thing anyone would ask for.
+   */
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy) return
+    cy.batch(() => {
+      cy.elements().removeClass('faded flag')
+      if (!only) return
+      const picked = cy.nodes().filter((el) => el.data('type') === only)
+      if (picked.empty()) return
+      cy.elements().difference(picked.union(picked.connectedEdges())).addClass('faded')
+      picked.addClass('flag')
+    })
+  }, [only, drawn])
 
   // ------------------------------------------------------------------ reading
 
@@ -703,6 +1034,19 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
   const face = node ? styleFor(node.type) : null
   const links = selected ? (index.degree.get(selected) ?? 0) : 0
 
+  /** The types actually on screen, commonest first — a key to this picture
+   *  rather than to the schema. `drawn` is the trigger because expanding is
+   *  what brings a new kind of thing into view. */
+  const present = useMemo(() => {
+    const seen = new Map<NodeType, number>()
+    for (const id of shown.current) {
+      const type = index.nodes.get(id)?.type
+      if (type) seen.set(type, (seen.get(type) ?? 0) + 1)
+    }
+    return [...seen.entries()].sort((a, b) => b[1] - a[1])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawn, index])
+
   /**
    * Reach a node from the panel rather than the picture.
    *
@@ -727,10 +1071,17 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
     open(id)
   }
 
+  /** Zoom about the middle of the canvas, not about the middle of the graph:
+   *  recentring on every press moved whatever he was looking at out from under
+   *  the cursor, which is the one thing a zoom control must not do. */
   const zoom = (by: number) => {
     const cy = cyRef.current
     if (!cy) return
-    cy.animate({ zoom: cy.zoom() * by, center: { eles: cy.elements() } }, { duration: 200 })
+    const level = Math.min(cy.maxZoom(), Math.max(cy.minZoom(), cy.zoom() * by))
+    cy.animate(
+      { zoom: { level, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } } },
+      { duration: 220, easing: 'ease-out-cubic' },
+    )
   }
 
   const fit = () => {
@@ -740,7 +1091,7 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
   }
 
   return (
-    <aside className="flex h-full min-h-0 w-full flex-col border-l border-line bg-rail">
+    <aside className="panel-in flex h-full min-h-0 w-full flex-col border-l border-line bg-rail shadow-[-18px_0_36px_-30px_rgba(13,13,13,0.45)]">
       <header className="flex shrink-0 items-center gap-3 px-4 pb-2.5 pt-3.5">
         <div className="min-w-0">
           <p className="truncate text-[13px] font-medium text-ink">
@@ -757,6 +1108,21 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
         </div>
 
         <div className="ml-auto flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => {
+              setShowKey((was) => !was)
+              if (showKey) setOnly(null)
+            }}
+            aria-label={showKey ? 'Hide the key' : 'Show the key'}
+            title="What the shapes mean"
+            aria-pressed={showKey}
+            className={`rounded-lg p-1.5 transition hover:bg-raised hover:text-ink ${
+              showKey ? 'bg-raised text-ink' : 'text-subtle'
+            }`}
+          >
+            <Shapes size={14} />
+          </button>
           <button
             type="button"
             onClick={() => zoom(1 / 1.35)}
@@ -787,7 +1153,7 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
             aria-label="Back to where it opened"
             title="Back to where it opened"
             className="rounded-lg p-1.5 text-subtle transition hover:bg-raised hover:text-ink disabled:opacity-30"
-            disabled={depth === 0}
+            disabled={opened === 0}
           >
             <RotateCcw size={14} />
           </button>
@@ -805,19 +1171,68 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
       <div className="relative min-h-0 flex-1">
         <div ref={host} className="h-full w-full" style={{ position: 'relative' }} />
 
-        <p className="pointer-events-none absolute inset-x-0 bottom-2 text-center text-[11px] text-subtle">
-          {held
-            ? `${held.hidden} more connections held back — the busiest ${FAN} are shown`
-            : depth === 0
-              ? 'Click any entity to open its connections'
-              : `Showing ${drawn} of ${entities.toLocaleString()} entities`}
-        </p>
+        {/* What the cursor is on. It sits above the node rather than beside the
+            pointer, so it never covers the thing being asked about. */}
+        {hover && (
+          <div
+            className="pointer-events-none absolute z-20 max-w-[220px] -translate-x-1/2 -translate-y-full rounded-lg border border-line bg-canvas px-2 py-1 shadow-[0_4px_14px_-6px_rgba(13,13,13,0.25)]"
+            style={{ left: hover.x, top: hover.y }}
+          >
+            <p className="truncate text-[11.5px] font-medium leading-4 text-ink">{hover.label}</p>
+            <p className="text-[10.5px] leading-4 text-subtle">
+              {hover.word} · {hover.links.toLocaleString()} {hover.links === 1 ? 'link' : 'links'}
+            </p>
+          </div>
+        )}
+
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-rail via-rail/85 to-transparent px-3 pb-2 pt-6">
+          {/* The key stands down while an entity is open. Two rows of chips
+              over a canvas that the entity panel has already shortened is the
+              key eating the picture it exists to explain — and the panel is
+              saying what that entity is, in words, at the same moment. */}
+          {showKey && !node && present.length > 0 && (
+            <div className="pointer-events-auto mb-1.5 flex flex-wrap justify-center gap-x-1 gap-y-0.5">
+              {present.map(([type, n]) => {
+                const face = styleFor(type)
+                const picked = only === type
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    // Picking a type is a question the officer would otherwise
+                    // have to ask in words — "where are the accounts in this?"
+                    onClick={() => setOnly(picked ? null : type)}
+                    title={`${n} on screen`}
+                    className={`inline-flex items-center gap-1 rounded-full px-1.5 py-[3px] text-[10.5px] transition ${
+                      picked
+                        ? 'bg-raised font-medium text-ink'
+                        : 'text-subtle hover:bg-raised/70 hover:text-muted'
+                    }`}
+                  >
+                    <Glyph shape={face.shape} tone={face.tone} />
+                    {face.word}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          <p className="text-center text-[11px] text-subtle">
+            {held
+              ? `${held.hidden} more connections held back — the busiest ${FAN} are shown`
+              : only
+                ? `Every ${styleFor(only).word} on screen. Press it again to see the rest.`
+                : opened === 0
+                  ? 'Click any entity to open its connections'
+                  : `Showing ${drawn} of ${entities.toLocaleString()} entities — click an open one again to close it`}
+          </p>
+        </div>
       </div>
 
       {/* One panel, and this is inside it (D25). An entity opens here; it never
           opens a second surface beside the chat. */}
       {node && face ? (
-        <div className="max-h-[46%] shrink-0 overflow-y-auto border-t border-line bg-canvas px-4 py-3.5">
+        <div className="rise max-h-[38%] shrink-0 overflow-y-auto border-t border-line bg-canvas px-4 py-3.5">
           <div className="flex items-start gap-2.5">
             <span
               aria-hidden

@@ -24,7 +24,7 @@ from backend.config import case_dir, now_iso
 
 GENESIS = "0" * 64
 
-ACTIONS = ("ingest", "extract", "infer", "query", "web_search", "export")
+ACTIONS = ("ingest", "extract", "infer", "query", "export")
 
 
 class CustodyError(RuntimeError):

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowUp, Check, Copy, Paperclip, Plus, Share2, Trash2 } from 'lucide-react'
+import { ArrowUp, Check, Copy, Paperclip, Plus, Share2, Trash2, Waypoints } from 'lucide-react'
 import type { CSSProperties } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -305,6 +305,18 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
     bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [turns.length, ask.isPending])
 
+  // Escape closes the brain. Anything that opens over the conversation should
+  // close the way everything else on a desktop closes, without him having to
+  // find the control that opened it.
+  useEffect(() => {
+    if (lit === null) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setLit(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [lit])
+
   const send = useCallback(
     (text?: string) => {
       const question = (text ?? draft).trim()
@@ -481,6 +493,33 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
 
       {/* ------------------------------------------------------------ chat */}
       <main className="flex min-w-0 flex-1 flex-col">
+        {/* The one control above the conversation. The brain used to be
+            reachable only by pressing the line under the composer or an
+            answer's own "show it on the brain" — both of which require
+            something to have happened first. An officer who has just opened a
+            case and wants to *look* at it had nowhere to press. */}
+        {caseId && (
+          <header className="flex shrink-0 items-center gap-3 px-4 pb-1 pt-3">
+            <p className="min-w-0 flex-1 truncate text-[13px] text-muted">
+              {openCase && openCase.title !== UNNAMED ? openCase.title : ''}
+            </p>
+            <button
+              type="button"
+              onClick={() => setLit((was) => (was === null ? { ids: [], ordered: false } : null))}
+              aria-pressed={lit !== null}
+              title={lit !== null ? 'Hide the brain' : "Open this case's brain"}
+              className={`hidden shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12.5px] transition lg:inline-flex ${
+                lit !== null
+                  ? 'border-line-strong bg-raised text-ink'
+                  : 'border-line bg-canvas text-muted hover:border-line-strong hover:text-ink'
+              }`}
+            >
+              <Waypoints size={14} className={lit !== null ? 'text-ink' : 'text-subtle'} />
+              Brain
+            </button>
+          </header>
+        )}
+
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-[46rem] px-5 py-10">
             {empty && (
@@ -660,6 +699,17 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
       </main>
 
       {/* ----------------------------------------------------------- brain */}
+      {lit !== null && caseId && !graph.data && (
+        // Pressing Brain must do something in the same frame it is pressed.
+        // Waiting for the graph before drawing anything read as a dead button.
+        <aside className="panel-in hidden w-[38%] min-w-[320px] shrink-0 flex-col border-l border-line bg-rail px-4 pt-3.5 shadow-[-18px_0_36px_-30px_rgba(13,13,13,0.45)] lg:flex">
+          <p className="text-[13px] font-medium text-ink">The brain of this case</p>
+          <p className="mt-0.5 text-[11.5px] text-subtle">
+            {graph.isError ? 'It could not be opened just now.' : 'Opening…'}
+          </p>
+        </aside>
+      )}
+
       {lit !== null && graph.data && caseId && (
         <div className="hidden w-[38%] min-w-[320px] lg:block">
           <Brain

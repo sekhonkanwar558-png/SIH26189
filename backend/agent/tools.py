@@ -158,24 +158,6 @@ def read_source_doc(
             "start": start, "end": end, "text": body}
 
 
-def search_web(ctx: CaseContext, query: str) -> list[dict]:
-    """OSINT only. **Never send case content here** (§5.2) — only a name or an
-    identifier the officer has already made public. Every call is logged to the
-    custody chain, so what left the machine is on the record."""
-    ctx.chain.append(action="web_search", actor=ctx.actor, ref=f"query:{query[:120]}",
-                     payload={"query": query})
-    return [{
-        "title": "web search is not wired up",
-        "url": "",
-        "snippet": (
-            "No search provider is configured. This tool exists so the boundary is explicit: "
-            "it is the only tool that leaves the machine, it never receives case content, and "
-            "every call is written to the custody chain. Wire a provider in "
-            "backend/agent/tools.py:search_web when one is chosen."
-        ),
-    }]
-
-
 # ------------------------------------------------------------------- act tools
 
 def record_conclusion(
@@ -272,7 +254,6 @@ READ_TOOLS = {
     "communities": communities,
     "anomalies": anomalies,
     "read_source_doc": read_source_doc,
-    "search_web": search_web,
     "chain_of_custody": chain_of_custody,
 }
 
