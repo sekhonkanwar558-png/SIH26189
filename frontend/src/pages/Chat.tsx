@@ -12,7 +12,7 @@ import {
   clearConversation,
   createCase,
   deleteCase,
-  getBrief,
+  getHealth,
   getCases,
   getConversation,
   getGraph,
@@ -23,7 +23,7 @@ import {
 import type { AgentAnswer, CaseCounts, ConversationTurn } from '../types'
 
 /**
- * shikonye — the whole product.
+ * Suishōdama — the whole product.
  *
  * One conversation per case, and the case's brain when there is something to
  * look at. There are no sections, no panels and no commands (D25, D26):
@@ -81,7 +81,7 @@ const softButton =
 
 function Thinking() {
   return (
-    <div className="flex items-center gap-1.5 py-1" aria-label="shikonye is working">
+    <div className="flex items-center gap-1.5 py-1" aria-label="Suishōdama is working">
       {[0, 1, 2].map((i) => (
         <span
           key={i}
@@ -223,19 +223,25 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
     enabled: Boolean(caseId) && lit !== null,
   })
 
-  // The opening brief is the assistant speaking first. It writes itself into the
-  // thread server-side and will not greet him twice for the same thing, so this
-  // is fire-and-refetch rather than something rendered on its own.
-  const brief = useQuery({
-    queryKey: ['brief', caseId],
-    queryFn: () => getBrief(caseId as string),
-    enabled: Boolean(caseId),
+  // Nothing here speaks on its own. The opening briefing used to run `/brief` —
+  // a full model call — the moment a case was opened, and again whenever it was
+  // refetched: answering a question records conclusions, new conclusions make
+  // new findings, and the next refetch saw fresh ones and ran the model again.
+  // Two typed questions produced five billed calls that way, three of them
+  // unprompted and one of them returning nothing usable. Kanwar's call, 09-06:
+  // the officer asks, and it answers — he can ask for a briefing like anything
+  // else, by typing a sentence. `/brief` still exists on the API; the interface
+  // no longer fires it.
+  //
+  // This replaces the briefing's other job. It used to be how the screen learned
+  // the assistant was unreachable — by making a paid call and watching it fail.
+  // `/api/health` says the same thing for nothing.
+  const health = useQuery({
+    queryKey: ['health'],
+    queryFn: getHealth,
     retry: false,
+    staleTime: 30_000,
   })
-
-  useEffect(() => {
-    if (brief.data) void client.invalidateQueries({ queryKey: ['conversation', caseId] })
-  }, [brief.data, caseId, client])
 
   const turns = useMemo<ConversationTurn[]>(
     () => conversation.data?.turns ?? [],
@@ -247,6 +253,32 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
 
   const ask = useMutation({
     mutationFn: (question: string) => askCase(caseId as string, question, activeOfficer.id),
+    // His own words go on screen the instant he presses send. The server records
+    // the question before it calls the model, so this is the real turn shown
+    // early rather than a hopeful placeholder — but the answer takes the better
+    // part of a minute, and for all of it the thread used to look exactly as it
+    // did before he typed. An officer reads that as "it didn't hear me" and
+    // sends it again, which costs a second run of the whole tool loop.
+    onMutate: async (question: string) => {
+      await client.cancelQueries({ queryKey: ['conversation', caseId] })
+      const previous = client.getQueryData<{ turns: ConversationTurn[] }>([
+        'conversation',
+        caseId,
+      ])
+      const turns = previous?.turns ?? []
+      const pending: ConversationTurn = {
+        seq: (turns[turns.length - 1]?.seq ?? 0) + 1,
+        role: 'officer',
+        actor: activeOfficer.id,
+        text: question,
+        answer: {},
+        node_ids: [],
+        ts: new Date().toISOString(),
+        graph_rev: 0,
+      }
+      client.setQueryData(['conversation', caseId], { turns: [...turns, pending] })
+      return { previous }
+    },
     onSuccess: (answer) => {
       void client.invalidateQueries({ queryKey: ['conversation', caseId] })
       void client.invalidateQueries({ queryKey: ['cases'] })
@@ -260,7 +292,7 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
       void client.invalidateQueries({ queryKey: ['conversation', caseId] })
       setNotice(
         isAssistantDown(error)
-          ? 'shikonye is not reachable right now. The case and everything in it are untouched — try again in a moment.'
+          ? 'Suishōdama is not reachable right now. The case and everything in it are untouched — try again in a moment.'
           : error instanceof ApiError
             ? error.message
             : 'That did not go through.',
@@ -296,7 +328,6 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
     mutationFn: () => clearConversation(caseId as string),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: ['conversation', caseId] })
-      void client.invalidateQueries({ queryKey: ['brief', caseId] })
       setNotice('The thread is cleared. The case keeps everything it has learned.')
     },
   })
@@ -348,7 +379,6 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
         const result = await uploadDocument(caseId, file)
         void client.invalidateQueries({ queryKey: ['cases'] })
         void client.invalidateQueries({ queryKey: ['graph', caseId] })
-        void client.invalidateQueries({ queryKey: ['memory', caseId] })
 
         const warnings = result.document.warnings ?? []
         if (warnings.length > 0) {
@@ -365,8 +395,6 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
             `${file.name} — the brain grew by ${count(nodes, 'entity', 'entities')} and ${count(edges, 'link')}.`,
           )
         }
-        // Something new arrived, so it may have something to say about it.
-        void client.invalidateQueries({ queryKey: ['brief', caseId] })
       } catch (error) {
         setNotice(error instanceof ApiError ? error.message : 'That file could not be added.')
       } finally {
@@ -376,13 +404,13 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
     [caseId, counts, client],
   )
 
-  const empty = turns.length === 0 && !ask.isPending && !brief.isLoading
-  // The briefing is the first thing that runs on opening a case, so it is also
-  // the first thing that fails when there is no model. Saying so here rather
-  // than waiting for him to type a question and get the same 503: with no
-  // assistant there is no product (D22), and he should learn that before he has
-  // composed a sentence, not after.
-  const assistantDown = brief.isError && isAssistantDown(brief.error)
+  const empty = turns.length === 0 && !ask.isPending
+  // With no assistant there is no product (D22), so he should learn that before
+  // he has composed a sentence rather than after. `model_available` only reports
+  // that a key is configured — a revoked key or a dead network still reads as
+  // fine here and surfaces on the first question instead, which is the price of
+  // not paying for a model call to find out.
+  const assistantDown = health.data ? !health.data.model_available : false
 
   return (
     <div
@@ -414,8 +442,8 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
               aria-hidden
               className="inline-block h-[7px] w-[7px] rounded-full bg-evidence"
             />
-            <p className="text-[15px] font-medium lowercase tracking-[-0.01em] text-ink">
-              shikonye
+            <p className="text-[15px] font-medium tracking-[-0.01em] text-ink">
+              Suishōdama
             </p>
           </div>
           <button
@@ -525,10 +553,10 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
             {empty && (
               <div className="pt-20 text-center">
                 <p
-                  className="settle text-[30px] font-medium lowercase tracking-[-0.03em] text-ink"
+                  className="settle text-[30px] font-medium tracking-[-0.03em] text-ink"
                   style={{ '--i': 0 } as CSSProperties}
                 >
-                  shikonye
+                  Suishōdama
                 </p>
                 <p
                   className="settle mx-auto mt-3.5 max-w-sm text-[14.5px] leading-6 text-muted"
@@ -543,7 +571,7 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
                     className="settle mx-auto mt-5 max-w-md rounded-2xl border border-[#f0dcdc] bg-danger-soft px-4 py-3 text-[13px] leading-6 text-danger"
                     style={{ '--i': 2 } as CSSProperties}
                   >
-                    shikonye is not reachable right now. The case, its documents and
+                    Suishōdama is not reachable right now. The case, its documents and
                     everything it has learned are untouched — documents can still be
                     added, and it will answer as soon as it is back.
                   </p>
@@ -602,7 +630,7 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
                 )
               })}
 
-              {(ask.isPending || brief.isLoading) && <Thinking />}
+              {ask.isPending && <Thinking />}
             </div>
 
             <div ref={bottom} />

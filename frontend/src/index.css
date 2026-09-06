@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* shikonye — one chat, and a graph when the answer has one.
+/* Suishōdama — one chat, and a graph when the answer has one.
  *
  * The palette is deliberately almost colourless: a near-white ground, one ink,
  * two greys, hairline borders. An officer is reading text for an hour, and
@@ -140,7 +140,7 @@ textarea {
 
 /* ------------------------------------------------------------------ motion */
 
-@keyframes shikonye-rise {
+@keyframes suishodama-rise {
   from {
     opacity: 0;
     transform: translateY(6px);
@@ -152,10 +152,10 @@ textarea {
 }
 
 .rise {
-  animation: shikonye-rise 320ms var(--ease-out-soft) both;
+  animation: suishodama-rise 320ms var(--ease-out-soft) both;
 }
 
-@keyframes shikonye-settle {
+@keyframes suishodama-settle {
   from {
     opacity: 0;
     transform: translateY(10px) scale(0.985);
@@ -168,11 +168,11 @@ textarea {
 
 /* The opening composition, staggered by `--i` so it arrives rather than blinks. */
 .settle {
-  animation: shikonye-settle 520ms var(--ease-out-soft) both;
+  animation: suishodama-settle 520ms var(--ease-out-soft) both;
   animation-delay: calc(var(--i, 0) * 70ms);
 }
 
-@keyframes shikonye-slide-in {
+@keyframes suishodama-slide-in {
   from {
     opacity: 0;
     transform: translateX(12px);
@@ -184,13 +184,13 @@ textarea {
 }
 
 .slide-in {
-  animation: shikonye-slide-in 380ms var(--ease-out-soft) both;
+  animation: suishodama-slide-in 380ms var(--ease-out-soft) both;
 }
 
 /* The brain arriving. It comes in from its own edge rather than appearing,
    because a panel that blinks into existence reads as a page change and this
    is the same page with more of it visible. */
-@keyframes shikonye-panel-in {
+@keyframes suishodama-panel-in {
   from {
     opacity: 0;
     transform: translateX(18px);
@@ -202,12 +202,12 @@ textarea {
 }
 
 .panel-in {
-  animation: shikonye-panel-in 340ms var(--ease-out-soft) both;
+  animation: suishodama-panel-in 340ms var(--ease-out-soft) both;
 }
 
 /* The canvas fades up once the layout has settled, so the officer never sees
    the half-second in which a force layout is still arguing with itself. */
-@keyframes shikonye-canvas-in {
+@keyframes suishodama-canvas-in {
   from {
     opacity: 0;
   }
@@ -217,10 +217,10 @@ textarea {
 }
 
 .canvas-in {
-  animation: shikonye-canvas-in 420ms var(--ease-out-soft) both;
+  animation: suishodama-canvas-in 420ms var(--ease-out-soft) both;
 }
 
-@keyframes shikonye-pulse {
+@keyframes suishodama-pulse {
   0%,
   100% {
     opacity: 0.25;
@@ -233,12 +233,12 @@ textarea {
 }
 
 .thinking-dot {
-  animation: shikonye-pulse 1.15s ease-in-out infinite;
+  animation: suishodama-pulse 1.15s ease-in-out infinite;
 }
 
 /* The brain line is the product's argument in one sentence, so when it changes
    it is worth a beat of attention — once, and never again after that. */
-@keyframes shikonye-grew {
+@keyframes suishodama-grew {
   0% {
     opacity: 0;
     transform: translateY(4px);
@@ -254,7 +254,7 @@ textarea {
 }
 
 .grew {
-  animation: shikonye-grew 700ms var(--ease-out-soft) both;
+  animation: suishodama-grew 700ms var(--ease-out-soft) both;
 }
 
 /* Prose is ragged rather than widowed. Costs nothing, and an answer that ends

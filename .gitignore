@@ -8,3 +8,4 @@ data/cases/
 output/
 *.pyc
 .gstack/
+.vite/

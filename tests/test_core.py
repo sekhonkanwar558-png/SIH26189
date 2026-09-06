@@ -800,13 +800,48 @@ def test_the_conversation_lives_on_the_case_and_the_model_is_given_it():
         assert "person:manjit_singh" in second[-1]["content"]
 
         # the case identity is standing context, not repeated in every turn
-        assert "conversation" in seen["system"] or case in seen["system"] \
-            or "entities" in seen["system"]
+        blocks = seen["system"]
+        text = "".join(b["text"] for b in blocks)
+        assert "conversation" in text or case in text or "entities" in text
+
+        # And the split that makes caching work: the standing instructions are
+        # their own block with the breakpoint on it, the case's changing numbers
+        # sit after it. Merge the two back into one string and the cached prefix
+        # is thrown away the moment a document lands — the bill goes up several
+        # times over and nothing else in the product looks any different, which
+        # is why this is asserted rather than left to a comment.
+        assert len(blocks) == 3, blocks
+        # Universal, then per-case, then per-question. The first two are cached;
+        # the third holds only what changes between one question and the next.
+        assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+        assert blocks[1]["cache_control"] == {"type": "ephemeral"}
+        assert "cache_control" not in blocks[2]
+        assert "entities and" in blocks[1]["text"], "counts belong with the per-case block"
+        assert "entities and" not in blocks[0]["text"], "counts in the universal block invalidate it for every case"
+        # The findings are the analytics layer's own answer to "who matters".
+        # Left out of the brief, the model reaches for centrality instead and
+        # names the man the officer already knows.
+        assert "concluded here" in blocks[2]["text"]
+        # A planted finding must actually reach the model, not just its heading.
+        # This is the defect that cost the demo its centrepiece: the analytics
+        # layer had "Harbhajan Dhillon connects this network but appears in no
+        # report" as finding #1, the brief never carried it, and asked who was
+        # running the network the model fell back on centrality and named the
+        # woman already in seven documents.
+        store.put_analytics("findings", [{
+            "id": "f_probe", "kind": "hidden_broker", "severity": "high",
+            "headline": "PROBE-HEADLINE-ONLY-A-TEST",
+            "detail": "planted so this assertion cannot pass vacuously",
+        }])
+        assert "PROBE-HEADLINE-ONLY-A-TEST" in agent._system()[1]["text"], (
+            "the computed findings must reach the model: without them it answers "
+            "'who matters' from centrality and names the man already in every report"
+        )
 
         # and it is readable back off the case, which is what makes it shared
         turns = store.conversation()
         assert [t["role"] for t in turns] == [
-            "officer", "shikonye", "officer", "shikonye"]
+            "officer", "suishodama", "officer", "suishodama"]
         store.close()
     finally:
         loop_mod.CaseAgent._run = original
@@ -892,9 +927,9 @@ def test_the_brief_does_not_greet_the_officer_twice_for_the_same_thing(demo):
         assert again["repeat"] is True
         assert again["narrative"]["answer"] == last["narrative"]["answer"]
 
-        spoken_before = len([t for t in store.conversation() if t["role"] == "shikonye"])
+        spoken_before = len([t for t in store.conversation() if t["role"] == "suishodama"])
         agent.brief()
-        spoken_after = len([t for t in store.conversation() if t["role"] == "shikonye"])
+        spoken_after = len([t for t in store.conversation() if t["role"] == "suishodama"])
         assert spoken_after == spoken_before, "the officer was greeted again"
     finally:
         loop_mod.CaseAgent._run = original
@@ -1090,3 +1125,41 @@ def test_betweenness_is_exact_on_a_case_that_fits_and_says_so_when_it_is_not(dem
         assert top and top[0]["estimated"] is True
         assert "about" in top[0]["why"], "an estimate was read out as a measurement"
     shutil.rmtree(case_dir(case), ignore_errors=True)
+
+
+def test_the_universal_prompt_carries_no_case_in_it():
+    """The engine is crime-type agnostic (D12) and the prompt has to be too.
+
+    The system prompt is sent for every case of every kind — a fraud, a
+    homicide, a missing person. It had three worked examples lifted from the
+    trafficking demo: two people's names, a tower co-location, a place, and a
+    real account id. An officer working a fraud case was being handed someone
+    else's case as the illustration of how to answer, and a reader of the prompt
+    would reasonably conclude the tool was built for one dataset.
+
+    The case's own identity belongs in the per-case block, which is built from
+    `case_type` and the officer's own brief. Nothing about a case belongs in the
+    block that every case shares.
+
+    Kanwar's instruction, 2026-09-06: *"no demo case names or shit s anywhere
+    pleasee, it a real peak tool after all... then only we can check if it works
+    well for every other case."*
+    """
+    import re
+
+    from backend.agent.loop import SYSTEM
+
+    planted = [
+        "Dhillon", "Manjit", "Suneel", "Sukhwinder", "Gurpreet", "Jaswant",
+        "Balraj", "Nisha", "Parminder", "Amarjit", "Tarun", "Ludhiana",
+        "Dhandari", "Gill Travels", "demo-114", "LDH-014",
+    ]
+    found = [name for name in planted if name in SYSTEM]
+    assert not found, f"demo-case names in the universal prompt: {found}"
+
+    # Generic, so it also catches names nobody has thought of yet: a real
+    # identifier is the shape of the contamination, whatever it is called.
+    assert not re.search(r"\d{10}", SYSTEM), "a 10-digit identifier in the universal prompt"
+    assert not re.search(r"(?:account|person|phone|vehicle|imei):\w+", SYSTEM), (
+        "a concrete node id in the universal prompt — teach the shape, never an instance"
+    )

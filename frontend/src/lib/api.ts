@@ -97,6 +97,12 @@ export const askCase = (caseId: string, question: string, actor: string) =>
 
 export const getBrief = (caseId: string) => request<CaseBrief>(caseUrl(caseId, '/brief'))
 
+// Free: reports whether a key is configured without calling the model. It is
+// how the interface knows to say the assistant is unreachable, now that
+// nothing runs on its own to find out the expensive way.
+export const getHealth = () =>
+  request<{ ok: boolean; model: string; model_available: boolean }>('/api/health')
+
 // -------------------------------------------------------------- the evidence
 
 export const getGraph = (caseId: string, includeDocuments = false) =>

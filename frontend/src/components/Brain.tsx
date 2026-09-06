@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getMemory, getNode, getSource } from '../lib/api'
+import { getNode, getSource } from '../lib/api'
 import type {
   CaseDocument,
   CaseGraph,
@@ -24,7 +24,7 @@ import type {
 } from '../types'
 
 /**
- * The case's brain — the graph it has built, and what it has worked out.
+ * The case's brain — the graph it has built.
  *
  * **This is not an illustration of an answer** (§2.5, D29). It is the thing the
  * answers are computed from: a graph on disk that grows every time a document
@@ -1014,22 +1014,10 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
     staleTime: 60_000,
   })
 
-  const memory = useQuery({
-    queryKey: ['memory', caseId],
-    queryFn: () => getMemory(caseId),
-    enabled: path.length === 0 && !selected,
-    staleTime: 30_000,
-  })
-
   const { nodes, edges, documents } = graph.counts
   // Documents are nodes too (§5.1); they are not entities, and the count
   // beside an upload's "read 11 entities" has to agree with it.
   const entities = nodes - documents
-  const conclusions = (memory.data ?? []).filter((m) => m.kind === 'conclusion').slice(0, 3)
-  const questions = (memory.data ?? [])
-    .filter((m) => m.kind === 'open_question' && m.status === 'open')
-    .slice(0, 2)
-
   const node = index.nodes.get(selected ?? '')
   const face = node ? styleFor(node.type) : null
   const links = selected ? (index.degree.get(selected) ?? 0) : 0
@@ -1313,43 +1301,7 @@ export function Brain({ caseId, graph, path, ordered, onClose, onAsk }: BrainPro
             </button>
           )}
         </div>
-      ) : (
-        path.length === 0 &&
-        (conclusions.length > 0 || questions.length > 0) && (
-          <div className="max-h-[38%] shrink-0 overflow-y-auto border-t border-line bg-canvas px-4 py-3">
-            {conclusions.length > 0 && (
-              <>
-                <p className="text-[11px] uppercase tracking-wide text-subtle">
-                  What it has worked out
-                </p>
-                <ul className="mt-1.5 space-y-1.5">
-                  {conclusions.map((item) => (
-                    <li key={item.id} className="text-[12px] leading-5 text-muted">
-                      {item.text}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-            {questions.length > 0 && (
-              <>
-                <p className="mt-3 text-[11px] uppercase tracking-wide text-subtle">Still open</p>
-                <ul className="mt-1.5 space-y-1.5">
-                  {questions.map((item) => (
-                    <li key={item.id} className="text-[12px] leading-5 text-muted">
-                      {item.text}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-            <p className="mt-3 text-[11px] leading-5 text-subtle">
-              This belongs to the case, not to the conversation. Clearing the thread does not
-              touch it.
-            </p>
-          </div>
-        )
-      )}
+      ) : null}
     </aside>
   )
 }

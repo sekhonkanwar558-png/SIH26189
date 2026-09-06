@@ -1,4 +1,4 @@
-# shikonye — the officer-facing front end
+# Suishōdama — the officer-facing front end
 
 One chat, and the graph when an answer has a route to show. There is no other screen. The design, and the reasons for it, are README §3.5 and decisions D24–D28; the pivot that produced it is §0.5. **Read those before changing anything here** — the six-section workspace this replaced was deleted on purpose.
 

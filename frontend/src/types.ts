@@ -134,7 +134,7 @@ export interface AgentAnswer {
  *  is fetched rather than remembered by the browser. */
 export interface ConversationTurn {
   seq: number
-  role: 'officer' | 'shikonye'
+  role: 'officer' | 'suishodama'
   actor: string
   text: string
   answer: AgentAnswer | Record<string, never>

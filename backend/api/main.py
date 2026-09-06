@@ -327,7 +327,7 @@ def ask(case_id: str, body: Question) -> dict:
             # 503, not a fabricated answer: the assistant is either
             # working or honestly unavailable (D22). The UI shows this
             # with a retry; everything else in the case still works.
-            raise HTTPException(503, f"shikonye is unavailable: {exc}") from exc
+            raise HTTPException(503, f"Suishōdama is unavailable: {exc}") from exc
 
 
 @app.get("/api/cases/{case_id}/brief")
@@ -342,7 +342,7 @@ def brief(case_id: str) -> dict:
             # 503, not a fabricated answer: the assistant is either
             # working or honestly unavailable (D22). The UI shows this
             # with a retry; everything else in the case still works.
-            raise HTTPException(503, f"shikonye is unavailable: {exc}") from exc
+            raise HTTPException(503, f"Suishōdama is unavailable: {exc}") from exc
 
 
 @app.post("/api/cases/{case_id}/findings/{finding_id}/investigate")
@@ -355,7 +355,7 @@ def investigate(case_id: str, finding_id: str) -> dict:
             # 503, not a fabricated answer: the assistant is either
             # working or honestly unavailable (D22). The UI shows this
             # with a retry; everything else in the case still works.
-            raise HTTPException(503, f"shikonye is unavailable: {exc}") from exc
+            raise HTTPException(503, f"Suishōdama is unavailable: {exc}") from exc
 
 
 @app.get("/api/cases/{case_id}/memory")
@@ -380,7 +380,7 @@ def close_memory(case_id: str, mem_id: str, status: str = Query("resolved")) -> 
 
 @app.get("/api/cases/{case_id}/conversation")
 def conversation(case_id: str, limit: int = 200) -> dict:
-    """The officer's thread with shikonye, oldest first.
+    """The officer's thread with Suishōdama, oldest first.
 
     It lives on the case, not in a browser: open the case on another machine, or
     hand it to a colleague, and the conversation is there. That is also what lets

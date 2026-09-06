@@ -37,7 +37,9 @@ Three rules the code enforces so they cannot be prompted away:
 
 from __future__ import annotations
 
+import logging
 import os
+from pathlib import Path
 from typing import Any, Callable
 
 from backend.agent import tools as T
@@ -46,6 +48,11 @@ from backend.agent.contract import (ANSWER_SCHEMA, empty_answer, parse, verify,
 from backend.agent.tools import CaseContext
 from backend.case import agent_context_header
 from backend.config import ANTHROPIC_MODEL
+
+# uvicorn configures this logger at INFO. A bare module logger would be silent
+# in the server console unless someone edits a logging config, and the one
+# thing we want visible on a $3 budget is what a question cost.
+log = logging.getLogger("uvicorn.error")
 
 MAX_TOOL_ITERATIONS = int(os.environ.get("SIH_MAX_TOOL_ITERATIONS", "14"))
 EFFORT = os.environ.get("SIH_EFFORT", "high")
@@ -92,19 +99,15 @@ answer that has not been checked against a document is a draft, not an answer.
 
 WHAT AN ANSWER LOOKS LIKE
 
-Answer in the officer's terms, not the graph's. He wants "Ravi's number shared a \
-tower with Suneel's at 22:10 on 3 August, and Suneel holds the account" — not a \
-description of nodes and edges. Lead with the finding. Keep it short; he is \
+Answer in the officer's terms, not the graph's. He wants "these two numbers were \nin the same place an hour before it happened, and one holds the account" — not a \ndescription of nodes and edges. Lead with the finding. Keep it short; he is \
 reading this between other work.
 
 Cite everything: `cited_nodes` and `cited_edges` are the ids you actually used, \
 and `highlight_path` is the route through the graph the officer should see lit \
-up. These are checked against the real graph after you answer, so a citation you \
-did not get from a tool will be caught and will discredit the whole answer.
+up. These are checked against the real graph after you answer, so a citation not \
+from a tool is caught and discredits the answer.
 
-Be exact about strength of evidence. A tower co-location is proximity, not \
-contact. A co-occurrence edge means two names appeared near each other in one \
-document — that is a lead, not a relationship. Put that in `caveats` rather than \
+Be exact about strength of evidence. Being in the same place is not contact. A \nco-occurrence edge means two names appeared near each other in one \ndocument — that is a lead, not a relationship. Put that in `caveats` rather than \
 softening the answer itself.
 
 If the case does not contain the answer, say so plainly and use \
@@ -114,21 +117,19 @@ only unforgivable failure here.
 
 WHAT THE OFFICER CAN ACTUALLY SEE
 
-One chat, and the graph when your answer has a route through it. There is no document list, no findings panel, no custody screen and no command he can type. **Anything he cannot see, he gets by asking you** — so answer "what's in this case", "what have you found", "where did that come from" and "has this been tampered with" in words, fully, rather than telling him to go and look. Use `chain_of_custody` for anything about tampering, integrity or whether the record can be trusted.
+One chat, and the graph when your answer has a route through it. No document list, no findings panel, no custody screen, no commands. **Anything he cannot see, he gets by asking you** — so answer "what's in this case", "what have you found", "where did that come from", "has this been tampered with" in words, fully, rather than sending him to look. Use `chain_of_custody` for tampering, integrity, or whether the record can be trusted.
 
-He is not technical. He will say "the Ludhiana account", never `account:50100244178`. Resolving that is your job and it is never his. Do not ask him for an id, do not print ids in your answer, and do not teach him a syntax.
+He is not technical. He says "the account the money went to", never an id. Resolving that is your job and it is never his. Do not ask him for an id, do not print ids in your answer, and do not teach him a syntax.
 
 WHAT YOU ARE RUNNING ON
 
-This case has a brain on disk — its graph, its analytics, its memory, its custody chain — and it grows every time a document arrives. You are not holding this case in a context window; you are querying that brain with tools, one call at a time. So never say you have "read" something you did not just fetch, never claim the case holds something because it feels likely, and remember that what you record with `record_conclusion` outlives this conversation and will be read back to you months from now.
+This case has a brain on disk — its graph, its analytics, its memory, its custody chain — and it grows every time a document arrives. You are not holding this case in a context window; you are querying that brain with tools, one call at a time. So never say you have "read" something you did not just fetch, never claim the case holds something because it feels likely, and what you record with `record_conclusion` outlives this conversation and is read back to you months from now.
 
 BEING USEFUL WITHOUT BEING ASKED
 
-You keep the case's memory. Use `recall` to check what you already concluded so \
-you do not repeat yourself, `record_conclusion` when you work something out that \
-is worth keeping, and `open_question` for what you could not settle. The officer \
-should never have to tell you the same thing twice, and should never have to read \
-a file to find out something you already know."""
+You keep the case's memory: `recall` what you concluded before, `record_conclusion` \nwhat is worth keeping, `open_question` what you could not settle. He should never \ntell you a thing twice.
+
+Be curious. If working his question turns up something he did not ask about and \nwould want — a name the paperwork never has, a pattern that contradicts the file — \ngive it a line at the end. You are worth having because you volunteer what he did \nnot think to ask."""
 
 
 class AgentUnavailable(RuntimeError):
@@ -147,11 +148,80 @@ def _client():
 
 
 def model_available() -> bool:
+    """Whether a key is *set* — not whether it works.
+
+    This constructs a client and nothing more: it never calls the API, so a
+    typo, a revoked key, an empty balance and a dead network all report True.
+    `GET /api/health` says the same thing, which is why the demo script tells
+    the presenter to ask Suishōdama a question rather than read a green tick.
+    """
     try:
         _client()
         return True
     except AgentUnavailable:
         return False
+
+
+def _uncached(params: dict[str, Any]) -> dict[str, Any]:
+    """The same request with every cache breakpoint removed.
+
+    Used only when the API rejects caching. The top-level marker is simply not
+    passed; the explicit one lives inside a `system` block and has to be lifted
+    out of the copy, or the retry is rejected for the same reason.
+    """
+    out = dict(params)
+    system = out.get("system")
+    if isinstance(system, list):
+        out["system"] = [{k: v for k, v in block.items() if k != "cache_control"}
+                         for block in system]
+    return out
+
+
+# Sonnet 5 list prices, $ per million tokens, recorded 2026-09-06. Cache reads
+# are a tenth of the input rate and cache writes a quarter above it. These are
+# here to make the console number predictable, not to replace it — the console
+# is what actually bills, and if these two disagree, the console is right.
+_USD_PER_MTOK = {"in": 2.00, "cache_read": 0.20, "cache_write": 2.50, "out": 10.00}
+
+
+def _log_usage(message: Any) -> None:
+    """Print what the last request of this run cost, and whether caching bit.
+
+    **This is one request, not one question.** The tool loop makes up to
+    """ + str(MAX_TOOL_ITERATIONS) + """ of them and a question costs roughly their sum, so this line is
+    a floor on the question and an exact read on one thing that matters: if
+    `cache_read` is 0 on every question after the first, the cached prefix is
+    being invalidated somewhere and the loop is costing several times what it
+    should.
+    """
+    u = getattr(message, "usage", None)
+    if u is None:
+        return
+    fresh = getattr(u, "input_tokens", 0) or 0
+    read = getattr(u, "cache_read_input_tokens", 0) or 0
+    write = getattr(u, "cache_creation_input_tokens", 0) or 0
+    out = getattr(u, "output_tokens", 0) or 0
+    usd = (fresh * _USD_PER_MTOK["in"] + read * _USD_PER_MTOK["cache_read"]
+           + write * _USD_PER_MTOK["cache_write"] + out * _USD_PER_MTOK["out"]) / 1_000_000
+    log.info("Suishōdama: last request — in=%s cache_read=%s cache_write=%s out=%s ~$%.4f",
+             fresh, read, write, out, usd)
+
+    # Also to disk, because the console line scrolls away and lives in whatever
+    # window uvicorn was started in. On a fixed budget the question "what have I
+    # spent so far" has to be answerable after the fact. `output/` is gitignored.
+    # Wrapped whole: a bookkeeping failure must never cost an officer an answer.
+    try:
+        import json
+        from datetime import datetime
+        rec = {"at": datetime.now().astimezone().isoformat(timespec="seconds"),
+               "model": ANTHROPIC_MODEL, "in": fresh, "cache_read": read,
+               "cache_write": write, "out": out, "usd": round(usd, 6)}
+        path = Path(__file__).resolve().parents[2] / "output" / "cost.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec) + chr(10))
+    except Exception:  # noqa: BLE001 - bookkeeping is never worth an exception
+        pass
 
 
 # --------------------------------------------------------------- tool binding
@@ -455,7 +525,7 @@ class CaseAgent:
         answer = verify(
             self._run(self._messages(question), system=self._system()), self.ctx.store)
 
-        self.ctx.store.say(role="shikonye", text=answer.get("answer", ""),
+        self.ctx.store.say(role="suishodama", text=answer.get("answer", ""),
                            answer=answer, node_ids=answer.get("cited_nodes") or [])
         self.ctx.chain.append(
             action="infer", actor="agent", ref=f"answer:{question[:80]}",
@@ -467,7 +537,7 @@ class CaseAgent:
 
     # ------------------------------------------------- what the model receives
 
-    def _system(self) -> str:
+    def _system(self) -> list[dict]:
         """The standing brief: who it is, and which case it is on.
 
         The case's identity belongs here rather than in the first user turn,
@@ -475,22 +545,71 @@ class CaseAgent:
         repeated on each one or slides out of the window as the thread grows —
         and an assistant that forgets which case it is on halfway through a
         conversation is not a teammate.
+
+        **Two blocks, and the split is the cost control.** The first is
+        identical on every request this product ever makes; the second changes
+        the moment a document lands or the agent records a conclusion. Caching
+        is a prefix match, so a single string would put the volatile half inside
+        the cached prefix and throw the entry away on every ingest. The
+        breakpoint sits between them: `tools` render ahead of `system`, so what
+        is cached here is the tool schemas plus the standing instructions —
+        about 2,100 tokens, comfortably over Sonnet 5's 1,024-token minimum —
+        and it is re-read at a tenth of the price on every question after the
+        first. What follows the breakpoint is small and genuinely per-request.
         """
         overview = T.case_overview(self.ctx)
         counts = overview["counts"]
-        return f"""{SYSTEM}
+        # Headline, detail and severity only. A finding also carries every node
+        # and edge it rests on — dozens of ids each, and around 19,000 characters
+        # for eight of them. That is uncached weight on every single request, for
+        # ids the model can ask for the moment it wants one.
+        # Same treatment for what it has already worked out. A memory entry
+        # carries every node and edge it touched plus timestamps and meta; eight
+        # conclusions came to 10,600 characters of which the model needs the
+        # sentence. And these *grow as the case is worked*, so leaving them fat
+        # puts the size of the case back into the size of the prompt — the exact
+        # thing §3.10 removed everywhere else.
+        def _slim(rows, keys, n=8):
+            return [{k: r.get(k) for k in keys if r.get(k) not in (None, "", [])}
+                    for r in (rows or [])[:n]]
 
-THIS CASE
+        findings = _slim(overview.get("findings"),
+                         ("id", "kind", "headline", "detail"))
+        conclusions = _slim(overview.get("conclusions"), ("id", "text", "confidence"))
+        open_questions = _slim(overview.get("open_questions"), ("id", "text"))
+        return [
+            {"type": "text", "text": SYSTEM,
+             "cache_control": {"type": "ephemeral"}},
+            # Second breakpoint: everything that changes only when a document is
+            # ingested. The findings belong here rather than after it — they are
+            # the most valuable thing in the brief and would otherwise be paid
+            # for at full rate on every question. Here they are re-read at a
+            # tenth, and an upload simply re-writes the entry once.
+            {"type": "text", "text": f"""THIS CASE
 
 {self._header()}
 
 It holds {counts['nodes']} entities and {counts['edges']} links drawn from {counts['documents']} documents. That is the whole of what you know about it; anything outside it you find with a tool or you do not say.
 
-What you have already concluded here:
-{_json(overview['conclusions'][:8])}
+Computed from the whole graph, deterministic, and not yours to re-derive. The
+officer has not seen any of it.
+
+**He already knows everyone in his own reports** — he wrote them. That the man
+named in seven documents is the most connected person is his own file read back
+to him, not information. Asked who matters, who is running this, who he has
+missed, or what to look at: **if a finding names someone the paperwork does not,
+that person opens your answer, by name, with the fact that no report mentions
+them.** Those already in the reports follow, as the layer beneath — context, not
+the answer. Centrality ranks position, never novelty, and its top name is one he
+could have given you himself.
+{_json(findings)}""",
+             "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": f"""What you have already concluded here:
+{_json(conclusions)}
 
 What you are still holding open:
-{_json(overview['open_questions'][:8])}"""
+{_json(open_questions)}"""},
+        ]
 
     def _messages(self, question: str) -> list[dict]:
         """The conversation so far, then what he just said.
@@ -532,7 +651,7 @@ What you are still holding open:
     def _focus(self, turns: list[dict]) -> list[str]:
         """Ids from the most recent answer, labelled — the referent set."""
         for turn in reversed(turns):
-            if turn["role"] != "shikonye":
+            if turn["role"] != "suishodama":
                 continue
             out = []
             for node_id in (turn.get("node_ids") or [])[:8]:
@@ -611,7 +730,7 @@ What you are still holding open:
         deterministic["narrative"] = narrative
         # It said this on this case, so it belongs in the thread the officer
         # reads — not only in the response to whoever happened to call /brief.
-        self.ctx.store.say(role="shikonye", text=narrative.get("answer", ""),
+        self.ctx.store.say(role="suishodama", text=narrative.get("answer", ""),
                            answer=narrative,
                            node_ids=narrative.get("cited_nodes") or [], actor=actor)
         for f in shown:
@@ -627,7 +746,7 @@ What you are still holding open:
         is instant and free and shows the officer the same words he saw before.
         """
         for turn in reversed(self.ctx.store.conversation(limit=CONVERSATION_TURNS)):
-            if turn["role"] == "shikonye" and turn.get("answer"):
+            if turn["role"] == "suishodama" and turn.get("answer"):
                 return turn["answer"]
         return None
 
@@ -663,14 +782,15 @@ What you are still holding open:
             "request it by name."
         )
         answer = verify(self._run(prompt, system=self._system()), self.ctx.store)
-        self.ctx.store.say(role="shikonye", text=answer.get("answer", ""),
+        self.ctx.store.say(role="suishodama", text=answer.get("answer", ""),
                            answer=answer, node_ids=answer.get("cited_nodes") or [],
                            actor="agent")
         return answer
 
     # -------------------------------------------------------------- the loop
 
-    def _run(self, prompt: str | list[dict], *, system: str | None = None) -> dict:
+    def _run(self, prompt: str | list[dict], *,
+             system: str | list[dict] | None = None) -> dict:
         """One tool-driven run. The SDK's tool runner owns the loop; we own the
         bound tools, the contract and the iteration cap.
 
@@ -685,21 +805,39 @@ What you are still holding open:
         messages = ([{"role": "user", "content": prompt}]
                     if isinstance(prompt, str) else list(prompt))
         client = _client()
+        params: dict[str, Any] = dict(
+            model=ANTHROPIC_MODEL,
+            max_tokens=MAX_TOKENS,
+            tools=_bind(self.ctx),
+            max_iterations=MAX_TOOL_ITERATIONS,
+            thinking={"type": "adaptive"},
+            output_config={
+                "effort": EFFORT,
+                "format": {"type": "json_schema", "schema": ANSWER_SCHEMA},
+            },
+            system=system if system is not None else SYSTEM,
+            messages=messages,
+        )
         try:
-            runner = client.beta.messages.tool_runner(
-                model=ANTHROPIC_MODEL,
-                max_tokens=MAX_TOKENS,
-                tools=_bind(self.ctx),
-                max_iterations=MAX_TOOL_ITERATIONS,
-                thinking={"type": "adaptive"},
-                output_config={
-                    "effort": EFFORT,
-                    "format": {"type": "json_schema", "schema": ANSWER_SCHEMA},
-                },
-                system=system or SYSTEM,
-                messages=messages,
-            )
-            message = runner.until_done()
+            try:
+                # Top-level automatic caching, on top of the explicit breakpoint
+                # in `_system`. The runner rebuilds the request on every
+                # iteration with the tool results appended, and this breakpoint
+                # moves forward with it — so iteration nine re-reads iterations
+                # one to eight at a tenth of the price instead of paying full
+                # rate for them again. The loop is where the money goes: a
+                # question costs roughly the *sum* over its iterations.
+                message = client.beta.messages.tool_runner(
+                    cache_control={"type": "ephemeral"}, **params).until_done()
+            except anthropic.BadRequestError as exc:
+                # Caching is an optimisation and must never be the reason an
+                # officer gets no answer. If the breakpoints are ever rejected —
+                # a model without caching, a changed limit — run it again
+                # without them. A rejected request costs nothing, so this retry
+                # is free, and a real 400 fails the same way twice and lands in
+                # the handler below.
+                log.warning("Suishōdama: caching rejected, retrying uncached (%s)", exc)
+                message = client.beta.messages.tool_runner(**_uncached(params)).until_done()
         except anthropic.NotFoundError as exc:
             raise AgentUnavailable(f"model {ANTHROPIC_MODEL} not available: {exc}") from exc
         except anthropic.RateLimitError as exc:
@@ -713,6 +851,18 @@ What you are still holding open:
             details = getattr(message, "stop_details", None)
             raise AgentUnavailable(f"the model declined this request ({details})")
 
+        _log_usage(message)
         text = next((b.text for b in message.content if getattr(b, "type", "") == "text"), "")
+        if not (text or "").strip():
+            # The contract's fallback turns this into "did not return a usable
+            # answer", which is correct behaviour and useless to debug from. The
+            # two ways to get here are the iteration cap (the loop ran out before
+            # it wrote an answer) and `max_tokens` (thinking ate the budget and
+            # the JSON was truncated) — and both are the most expensive call the
+            # system can make, returning nothing. Say which one it was.
+            log.warning("Suishōdama: no answer text — stop_reason=%s blocks=%s iterations_cap=%s",
+                        getattr(message, "stop_reason", None),
+                        [getattr(b, "type", "?") for b in message.content],
+                        MAX_TOOL_ITERATIONS)
         return parse(text)
 

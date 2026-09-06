@@ -1,4 +1,4 @@
-# Demo script — SIH26189, shikonye
+# Demo script — SIH26189, Suishōdama
 
 **The run sheet for the 8th.** Written 2026-09-05, rewritten 2026-09-06 for the pivot
 (README §0.5). Read this with README §9 open; it is the *how*, and §9 is the *why*.
@@ -28,7 +28,7 @@ pnpm --dir frontend dev                             # terminal 2
    125 nodes README §11 quotes.
 2. **Check the assistant is alive.** Ask it anything — "what is this case
    about?" — and make sure an answer comes back. **There is no offline mode**
-   (D22): with no API key or no network, `shikonye` says it is unavailable and
+   (D22): with no API key or no network, `Suishōdama` says it is unavailable and
    nothing else in the demo works. The key and the connection are requirements,
    not to-do items. Check them before the room fills, not at minute four.
 3. Have `tests/fixtures/fir-114-text.pdf` on the desktop, renamed to something an
@@ -254,7 +254,7 @@ watching it change.
 
 **If the assistant cannot be reached, it says so and nothing else pretends.**
 There is no degraded mode (D22): the graph, the documents and the custody chain
-are all still there and still true, and shikonye tells him plainly that it is
+are all still there and still true, and Suishōdama tells him plainly that it is
 unavailable rather than answering anyway. **So the round needs the key and a
 network.** Check both before you start — §0.
 
@@ -269,7 +269,7 @@ sentence; say it and keep moving.
 | An answer is slow | Nothing. Talk over it: the officer's problem, the nine documents. | Wait. |
 | An answer is wrong or thin | "It only says what the graph contains — let me show you the graph." | Ask query 1, which lights the route. |
 | The graph panel does not open | The answer had no route to show. | Ask query 1; its answer always has one. |
-| shikonye says it is unavailable | "The assistant is a model call; the case is on disk and untouched." | Check the key and the network. **Nothing else in the demo works until it is back** (D22). |
+| Suishōdama says it is unavailable | "The assistant is a model call; the case is on disk and untouched." | Check the key and the network. **Nothing else in the demo works until it is back** (D22). |
 | The API is down | "Two-terminal setup — one moment." | Restart uvicorn. Case data is on disk and survives. |
 | A judge asks for OCR on a scan | "It detects a scan and tells the officer it could not read it, rather than accepting it silently. Reading it means OCR, which puts a lossy step in front of the evidence — that is a decision, not an oversight." | §13. |
 | A judge asks about real data | "Synthetic, deliberately: no public FIR/CDR corpus exists and real crime data is a legal problem. Because we planted the structure, we can prove the system found it." | §9.1. |

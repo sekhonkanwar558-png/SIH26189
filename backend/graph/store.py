@@ -104,7 +104,7 @@ CREATE INDEX IF NOT EXISTS ix_mem_status ON agent_memory(status);
 -- one cold question, which is what makes "and what about him?" work at all.
 CREATE TABLE IF NOT EXISTS conversation (
     seq        INTEGER PRIMARY KEY AUTOINCREMENT,
-    role       TEXT NOT NULL,          -- 'officer' | 'shikonye'
+    role       TEXT NOT NULL,          -- 'officer' | 'suishodama'
     actor      TEXT NOT NULL DEFAULT 'officer',
     text       TEXT NOT NULL,
     answer     TEXT NOT NULL DEFAULT '{}',   -- the full §5.3 answer, for replay
@@ -493,8 +493,8 @@ class CaseStore:
 
     def say(self, *, role: str, text: str, answer: dict | None = None,
             node_ids: Sequence[str] = (), actor: str = "officer") -> dict:
-        """Append one turn. Roles are 'officer' and 'shikonye'."""
-        if role not in ("officer", "shikonye"):
+        """Append one turn. Roles are 'officer' and 'suishodama'."""
+        if role not in ("officer", "suishodama"):
             raise ValueError(f"unknown role {role!r}")
         cur = self.conn.execute(
             "INSERT INTO conversation(role,actor,text,answer,node_ids,ts,graph_rev) "
