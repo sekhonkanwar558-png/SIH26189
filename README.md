@@ -804,7 +804,7 @@ pip install -r requirements.txt
 cp .env.example .env            # then put the key in .env — see §8
 
 python -m data.synthetic.generate --case demo-114   # build the demo case (§9)
-python -m pytest tests -q                           # 35 tests, all should pass
+python -m pytest tests -q                           # 37 tests, all should pass
 uvicorn backend.api.main:app --reload               # http://127.0.0.1:8000/docs
 ```
 
@@ -826,7 +826,7 @@ pnpm --dir frontend build
 pnpm --dir frontend lint
 ```
 
-**It runs without an API key.** Ingest, the graph, analytics, findings and custody need no model at all (D4, D11). `/ask` and `/brief` fall back to a deterministic graph answer and say so in `caveats`. Only the model's narration and multi-step investigation need the key.
+**Most of it runs without an API key** — ingest, the graph, analytics, findings, custody and the whole brain panel need no model at all (D4, D11), so a cold clone can build the demo case and explore it. **`/ask`, `/brief` and `/investigate` return 503**, because D22 deleted the offline path on purpose: no key or no network means no assistant, and nothing pretends otherwise. *(This paragraph promised a deterministic fallback and `caveats` until 2026-09-06 — the thing D22 removed on 09-05.)*
 
 **spaCy is optional** and not in `requirements.txt`. The always-on cue patterns handle FIR prose; spaCy adds recall on documents shaped differently:
 
@@ -951,6 +951,7 @@ The failure mode of a six-person hackathon is everyone building alone until hour
 | API — every endpoint in §5.6 | **built**, returning real data |
 | Demo case — generator + planted ground truth | **built, tested** — **125 nodes: 116 entities and 9 documents**, 1,148 links. The interface says *116 entities · 1,148 links · 9 documents*, because a document is a node but it is not an entity and an upload reports the two separately. |
 | **Front end — one chat** | **built, driven in a browser against `demo-114` (2026-09-06)**: the thread, the evidence trail, the brain panel with the route lit hop by hop, upload by paperclip and by drag-and-drop, and the brain line reporting what each document added |
+| **The brain panel — interactive** | **rebuilt 2026-09-06.** Opens on a readable core, every node opens to its own connections on a click, entities are drawn by type, and each one's documents open to the exact line. D34–D36 |
 | `docs/demo-script.md` | **written, current with the pivot** |
 
 **`python -m pytest tests -q` → 37 passed.** What that covers, beyond the §9.1 plants:
@@ -1064,6 +1065,15 @@ The failure mode of a six-person hackathon is everyone building alone until hour
   - **25 → 37 tests, all mutation-checked.** Three of the five new guards were asleep on the first attempt: two asserted against the constant they were testing, one had a bar that sat on both sides of the bug. Fixed and re-checked.
   - **The dead code went with the dead spec.** `frontend/` dropped **eight dependencies** — every Radix package, `clsx`, `tailwind-merge` — which existed for the dialogs, dropdowns, tabs and tooltips of the deleted workspace; the lockfile went from 2,087 lines to 980. Four API-client functions with no caller (`getHealth`, `getCase`, `getDocuments`, `getCustody`) and eleven types nothing referenced are gone. **Also purged from this file**: the block diagram's "SPLIT-SCREEN UI" box, §3.7's "empty workspace", §7's Radix line, §9.2's "open the source view", §9.3's "open the custody log", §10.3's "entity panel", and §5.6's note 2 — which still promised a briefing that arrives with an apology in `caveats` when the model is down, a thing D22 deleted a day earlier.
   - **Three defects the browser found and the tests did not**: `/nodes/{id}` counted a document once per offset (12 documents on a 9-document case); the evidence trail printed entity ids at an officer who must never see one (D26); and a case with an unreachable assistant said nothing until he had typed a question.
+
+- **2026-09-06, later (Kanwar + Claude)** — **the brain panel became an instrument, and the interface stopped looking like a prototype.** No contract moved; `frontend/` only. What the next agent needs to know:
+  - **The graph was a picture of having a graph, not a way of reading one.** It drew all 125 nodes as identical 9px grey dots with no labels, no type, no hover and **no click handler at all** — an officer could not tell a person from a bank account, and nothing happened when he pressed one. **D34: the graph opens on a readable core and opens further where he asks it to.** People and organisations first, then the phones, accounts and places that bridge two or more of them; every node fans out to its own neighbours on a click, born at their parent so the eye keeps hold of where they came from, and nothing already on screen moves.
+  - **D35: a type is drawn, not written.** Shape carries it (ellipse/hexagon/pentagon/diamond/barrel/rectangle) and a desaturated tone second, so it survives a projector and a colour-blind judge. **Evidence Amber is untouched and still means exactly one thing** (D28) — it overrides type whenever a node is lit. Node size is degree, which is the case's own argument about who matters.
+  - **D36: every node opens to what is inside it.** The entity panel — *inside* the brain panel, never a second surface (D25) — lists every document the entity appears in, and each row opens to **the exact passage with its character offsets**, the same trail `Evidence` draws under an answer. Its connections are listed too and each is clickable, which adds it to the graph and opens it. A structured row that links without quoting prose says so rather than showing an empty box.
+  - **Four defects found by driving it, three of which no test could see.** `square` is **not a cytoscape node shape** — it was accepted into the stylesheet in silence and then failed in the renderer's shape lookup, blanking **the entire node layer**: 26 nodes present, `visible()`, correctly positioned and styled, and not one pixel drawn. `cy.resize()` **returns early when the box has not changed**, so the opening frame never landed and the graph appeared only if you happened to resize the window; it needs an explicit `forceRender()`. The seed of "busiest 26" was **16 phone numbers, 7 towers and one person** — raw degree ranks the switchboard above the people using it, the same reason the backend projects onto persons before ranking (D13). And the post-expand fit ran *before* the entity panel had taken its share of the canvas, so new nodes landed underneath it.
+  - **A caution for whoever debugs this canvas next:** `getImageData` on cytoscape's stacked canvases reported **zero painted pixels on a graph that was drawing correctly**, and a hidden browser pane throttles `requestAnimationFrame` — which is cytoscape's whole draw loop — so the canvas is blank for reasons that have nothing to do with the code. **Two of the hours spent here went to diagnostics that were themselves wrong.** Screenshot the running app; do not trust pixel sampling.
+  - **The look.** The palette did not change and must not: near-colourless, one ink, hairlines, amber alone carrying meaning. What was missing was never colour — it was layering, a type scale with a hierarchy in it, one easing curve (`--ease-out-soft`) used by everything that moves, and states that respond. Restraint had been reading as unfinished.
+  - **37 tests still pass, build and lint clean.** `README` §7 was corrected while here: it promised an offline fallback with `caveats` that **D22 deleted the day before**, and said 35 tests.
 
 Append one line per session. What you built · what you changed in this file · what the next agent needs to know.
 

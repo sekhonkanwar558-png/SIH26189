@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowUp, Check, Copy, Paperclip, Plus, Share2, Trash2 } from 'lucide-react'
+import type { CSSProperties } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Brain } from '../components/Brain'
@@ -203,6 +204,7 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
 
   const fileInput = useRef<HTMLInputElement | null>(null)
   const bottom = useRef<HTMLDivElement | null>(null)
+  const composer = useRef<HTMLTextAreaElement | null>(null)
 
   const cases = useQuery({
     queryKey: ['cases'],
@@ -394,17 +396,29 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
         style={{ width: RAIL }}
         aria-label="Cases"
       >
-        <div className="px-3 py-4">
-          <p className="px-2 pb-3 text-[15px] lowercase tracking-tight text-ink">shikonye</p>
+        <div className="px-3 pb-3 pt-5">
+          <div className="flex items-center gap-2 px-2 pb-5">
+            <span
+              aria-hidden
+              className="inline-block h-[7px] w-[7px] rounded-full bg-evidence"
+            />
+            <p className="text-[15px] font-medium lowercase tracking-[-0.01em] text-ink">
+              shikonye
+            </p>
+          </div>
           <button
             type="button"
             onClick={() => start.mutate()}
-            className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-[13px] text-ink transition hover:bg-raised"
+            className="flex w-full items-center gap-2 rounded-xl border border-line bg-canvas px-2.5 py-2 text-[13px] font-medium text-ink shadow-[0_1px_2px_rgba(13,13,13,0.04)] transition hover:border-line-strong hover:shadow-[0_2px_6px_rgba(13,13,13,0.06)] active:scale-[0.99]"
           >
-            <Plus size={15} />
+            <Plus size={15} className="text-subtle" />
             New case
           </button>
         </div>
+
+        <p className="px-5 pb-1.5 text-[11px] font-medium uppercase tracking-[0.07em] text-subtle">
+          Cases
+        </p>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
           {(cases.data ?? []).map((item) => {
@@ -415,8 +429,10 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
                 <button
                   type="button"
                   onClick={() => navigate(`/c/${encodeURIComponent(item.case_id)}`)}
-                  className={`w-full truncate rounded-xl py-2 pl-2 pr-8 text-left text-[13px] transition ${
-                    active ? 'bg-raised text-ink' : 'text-muted hover:bg-raised hover:text-ink'
+                  className={`relative w-full truncate rounded-xl py-[7px] pl-2.5 pr-8 text-left text-[13px] transition ${
+                    active
+                      ? 'bg-raised font-medium text-ink'
+                      : 'text-muted hover:bg-raised/70 hover:text-ink'
                   }`}
                   title={item.title}
                 >
@@ -468,28 +484,40 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-[46rem] px-5 py-10">
             {empty && (
-              <div className="pt-24 text-center">
-                <p className="text-[22px] lowercase tracking-tight text-ink">shikonye</p>
-                <p className="mx-auto mt-3 max-w-md text-[14px] leading-6 text-muted">
+              <div className="pt-20 text-center">
+                <p
+                  className="settle text-[30px] font-medium lowercase tracking-[-0.03em] text-ink"
+                  style={{ '--i': 0 } as CSSProperties}
+                >
+                  shikonye
+                </p>
+                <p
+                  className="settle mx-auto mt-3.5 max-w-sm text-[14.5px] leading-6 text-muted"
+                  style={{ '--i': 1 } as CSSProperties}
+                >
                   {caseId
                     ? 'Hand it the case file. Ask it anything about what is in there.'
                     : 'Open a case, hand it the file, and ask it anything about what is in there.'}
                 </p>
                 {assistantDown && (
-                  <p className="mx-auto mt-4 max-w-md text-[13px] leading-6 text-danger">
+                  <p
+                    className="settle mx-auto mt-5 max-w-md rounded-2xl border border-[#f0dcdc] bg-danger-soft px-4 py-3 text-[13px] leading-6 text-danger"
+                    style={{ '--i': 2 } as CSSProperties}
+                  >
                     shikonye is not reachable right now. The case, its documents and
                     everything it has learned are untouched — documents can still be
                     added, and it will answer as soon as it is back.
                   </p>
                 )}
                 {caseId && !assistantDown && (
-                  <div className="mt-7 flex flex-wrap justify-center gap-2">
-                    {OPENERS.map((opener) => (
+                  <div className="mt-8 flex flex-col items-center gap-2">
+                    {OPENERS.map((opener, i) => (
                       <button
                         key={opener}
                         type="button"
                         onClick={() => send(opener)}
-                        className="rounded-full border border-line px-3.5 py-1.5 text-[13px] text-muted transition hover:border-line-strong hover:text-ink"
+                        style={{ '--i': i + 2 } as CSSProperties}
+                        className="settle w-full max-w-sm rounded-xl border border-line bg-canvas px-4 py-2.5 text-left text-[13.5px] text-muted shadow-[0_1px_2px_rgba(13,13,13,0.03)] transition hover:-translate-y-px hover:border-line-strong hover:text-ink hover:shadow-[0_3px_10px_rgba(13,13,13,0.06)] active:translate-y-0"
                       >
                         {opener}
                       </button>
@@ -550,7 +578,7 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
               <p className="mb-2 px-2 text-[13px] text-muted">Reading {uploading}…</p>
             )}
 
-            <div className="flex items-end gap-2 rounded-[26px] border border-line-strong bg-canvas px-3 py-2 shadow-[0_2px_10px_rgba(13,13,13,0.04)] transition focus-within:border-ink/25">
+            <div className="flex items-end gap-2 rounded-[26px] border border-line-strong bg-canvas px-3 py-2 shadow-[0_1px_2px_rgba(13,13,13,0.04),0_8px_24px_-12px_rgba(13,13,13,0.14)] transition duration-200 focus-within:border-ink/20 focus-within:shadow-[0_1px_2px_rgba(13,13,13,0.05),0_12px_32px_-14px_rgba(13,13,13,0.2)]">
               <button
                 type="button"
                 aria-label="Add a document to this case"
@@ -572,6 +600,7 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
               />
 
               <textarea
+                ref={composer}
                 rows={1}
                 value={draft}
                 disabled={!caseId}
@@ -595,7 +624,7 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
                 onClick={() => send()}
                 disabled={!draft.trim() || ask.isPending || !caseId}
                 aria-label="Send"
-                className="rounded-full bg-ink p-2 text-white transition disabled:bg-line-strong disabled:text-subtle"
+                className="rounded-full bg-ink p-2 text-white transition duration-200 hover:opacity-85 active:scale-95 disabled:bg-line-strong disabled:text-subtle disabled:hover:opacity-100 disabled:active:scale-100"
               >
                 <ArrowUp size={15} />
               </button>
@@ -603,20 +632,21 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
 
             {/* ------------------------------------------------- the brain bar */}
             {caseId && counts && (
-              <p className="mt-2.5 text-center text-[12px] leading-5">
+              <p className="mt-3 text-center text-[12px] leading-5">
                 {grew ? (
                   <button
                     type="button"
                     onClick={() => setLit({ ids: [], ordered: false })}
-                    className="rise text-ink transition hover:text-evidence"
+                    className="grew inline-flex items-center gap-1.5 rounded-full border border-evidence/25 bg-evidence-soft px-3 py-1 font-medium text-evidence transition hover:border-evidence/40"
                   >
+                    <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-evidence" />
                     {grew}
                   </button>
                 ) : (
                   <button
                     type="button"
                     onClick={() => setLit({ ids: [], ordered: false })}
-                    className="text-subtle transition hover:text-muted"
+                    className="rounded-full px-3 py-1 text-subtle transition hover:bg-raised hover:text-muted"
                   >
                     This case&rsquo;s brain holds {count(entitiesIn(counts), 'entity', 'entities')},{' '}
                     {count(counts.edges, 'link')} and {count(counts.documents, 'document')}. It
@@ -638,6 +668,13 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
             path={lit.ids}
             ordered={lit.ordered}
             onClose={() => setLit(null)}
+            // An entity he clicked becomes a question he is about to ask. The
+            // graph answers nothing itself — it hands the sentence to the one
+            // chat and lets him change it before it goes (D25).
+            onAsk={(question) => {
+              setDraft(question)
+              composer.current?.focus()
+            }}
           />
         </div>
       )}
@@ -645,8 +682,8 @@ function CaseChat({ caseId }: { caseId: string | undefined }) {
       {/* Dropping a file anywhere on the screen is the officer's one job, so it
           works anywhere on the screen. */}
       {dragging && caseId && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-canvas/80">
-          <p className="rounded-2xl border border-dashed border-line-strong px-6 py-4 text-[14px] text-muted">
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-canvas/70 backdrop-blur-[2px]">
+          <p className="rise rounded-2xl border-2 border-dashed border-evidence/40 bg-canvas px-7 py-5 text-[14px] font-medium text-evidence shadow-[0_8px_30px_-12px_rgba(13,13,13,0.2)]">
             Drop it here and it goes into this case
           </p>
         </div>
