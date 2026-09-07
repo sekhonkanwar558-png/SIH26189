@@ -9,3 +9,8 @@ output/
 *.pyc
 .gstack/
 .vite/
+
+# Submission artefacts stay on this machine only — decks, reports, video, and
+# every intermediate. They are readable from the filesystem and belong nowhere
+# else. Kanwar, 2026-09-07.
+submission/
